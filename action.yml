@@ -1,11 +1,31 @@
-name: 'Your name here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: '@i40mc/azure-container-registry-cleanup-action'
+description: 'This action cleans up old image tags in an Azure Container Registry'
+author: 'scomans'
 inputs:
-  milliseconds: # change this
+  keep:
+    required: false
+    description: 'Amount of images to keep'
+    default: '3'
+  dontCountUntaggedImages:
+    required: false
+    description: 'If set to true all untagged images will not add to the amount of kept images'
+    default: 'true'
+  tenantId:
     required: true
-    description: 'input description here'
-    default: 'default value if applicable'
+    description: 'Azure Tenant ID'
+  secret:
+    required: true
+    description: 'Azure Secret'
+  clientId:
+    required: true
+    description: 'Azure Client ID'
+  repos:
+    required: true
+    description: 'Repos that will be cleaned. Can be seperated by spaces, comma, semicolon or new line'
+  endpoint:
+    required: true
+    description: 'Azure Container Registry endpoint'
+
 runs:
   using: 'node12'
   main: 'dist/index.js'

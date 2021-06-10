@@ -1,105 +1,85 @@
-<p align="center">
-  <a href="https://github.com/actions/typescript-action/actions"><img alt="typescript-action status" src="https://github.com/actions/typescript-action/workflows/build-test/badge.svg"></a>
-</p>
+# Get affected Nx apps action
 
-# Create a JavaScript Action using TypeScript
+This action gets the apps affected by the changes since the last successful build and sets them as outputs.
 
-Use this template to bootstrap the creation of a TypeScript action.:rocket:
+## Inputs
 
-This template includes compilation support, tests, a validation workflow, publishing, and versioning guidance.  
 
-If you are new, there's also a simpler introduction.  See the [Hello World JavaScript Action](https://github.com/actions/hello-world-javascript-action)
+### `keep`
 
-## Create an action from this template
+Amount of images to keep. Default: `3`
 
-Click the `Use this Template` and provide the new repo details for your action
+### `dontCountUntaggedImages`
 
-## Code in Main
+If set to true all untagged images will not add to the amount of kept images. Default: `true`
 
-> First, you'll need to have a reasonably modern version of `node` handy. This won't work with versions older than 9, for instance.
+### `tenantId`
 
-Install the dependencies  
-```bash
-$ npm install
-```
+**Required** Azure Tenant ID
 
-Build the typescript and package it for distribution
-```bash
-$ npm run build && npm run package
-```
+### `secret`
 
-Run the tests :heavy_check_mark:  
-```bash
-$ npm test
+**Required** Azure Secret
 
- PASS  ./index.test.js
-  ✓ throws invalid number (3ms)
-  ✓ wait 500 ms (504ms)
-  ✓ test runs (95ms)
+### `clientId`
 
-...
-```
+**Required** Azure Client ID
 
-## Change action.yml
+### `repos`
 
-The action.yml contains defines the inputs and output for your action.
+**Required** Repos that will be cleaned. Can be seperated by spaces, comma, semicolon or new line
 
-Update the action.yml with your name, description, inputs and outputs for your action.
+### `endpoint`
 
-See the [documentation](https://help.github.com/en/articles/metadata-syntax-for-github-actions)
+**Required** Azure Container Registry endpoint'
 
-## Change the Code
+### `github_token`
 
-Most toolkit and CI/CD operations involve async operations so the action is run in an async function.
+**Required** Your GitHub access token (see Usage below).
 
-```javascript
-import * as core from '@actions/core';
-...
+### `workflow_id`
 
-async function run() {
-  try { 
-      ...
-  } 
-  catch (error) {
-    core.setFailed(error.message);
-  }
-}
+**Required** The `id` of the workflow to check against (e.g. main.yml).
 
-run()
-```
+### `branch`
 
-See the [toolkit documentation](https://github.com/actions/toolkit/blob/master/README.md#packages) for the various packages.
+Branch to get last successful commit from. Default: `main`
 
-## Publish to a distribution branch
+## Outputs
 
-Actions are run from GitHub repos so we will checkin the packed dist folder. 
+### `repos`
 
-Then run [ncc](https://github.com/zeit/ncc) and push the results:
-```bash
-$ npm run package
-$ git add dist
-$ git commit -a -m "prod dependencies"
-$ git push origin releases/v1
-```
+An array of all affected apps.
 
-Note: We recommend using the `--license` option for ncc, which will create a license file for all of the production node modules used in your project.
+### `endpoint`
 
-Your action is now published! :rocket: 
+A comma seperated string of all affected apps
 
-See the [versioning documentation](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
+## Outputs
 
-## Validate
+### `count`
 
-You can now validate the action by referencing `./` in a workflow in your repo (see [test.yml](.github/workflows/test.yml))
+The amount of images that got deleted
+
+## Example usage
 
 ```yaml
-uses: ./
-with:
-  milliseconds: 1000
+jobs:
+  cleanup-acr:
+    runs-on: ubuntu-latest
+    name: Cleanup ACR
+    outputs:
+      deletedImageCount: ${{ steps.acr-cleanup.outputs.count }}
+    steps:
+      - uses: i40MC/azure-container-registry-cleanup-action@v1
+        id: acr-cleanup
+        with:
+          keep: 3
+          dontCountUntaggedImages: true
+          tenantId: <Azure-Tenant-ID>
+          secret: <Azure-Secret>
+          clientId: <Azure-Client-ID>
+          repos: repo-a repo-b,repo-c;repo-d
+          endpoint: example.azurecr.io
+
 ```
-
-See the [actions tab](https://github.com/actions/typescript-action/actions) for runs of this action! :rocket:
-
-## Usage:
-
-After testing you can [create a v1 tag](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md) to reference the stable and latest V1 action

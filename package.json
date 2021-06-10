@@ -1,6 +1,6 @@
 {
   "name": "@i40mc/azure-container-registry-cleanup-action",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "This action cleans up old image tags in an Azure Container Registry",
   "main": "lib/main.js",

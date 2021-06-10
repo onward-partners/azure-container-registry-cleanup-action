@@ -52,10 +52,17 @@ function run() {
             const imagesToKeep = parseInt(core.getInput('keep'), 10);
             const dontCountUntaggedImages = core.getBooleanInput('dontCountUntaggedImages');
             const endpoint = core.getInput('endpoint');
-            const repos = core.getInput('repos').split(/[,;\n\s]/);
+            const repos = core.getInput('repos').split(/[,;\n\s]/).map(r => r.trim()).filter(r => r !== '');
             const tenantId = core.getInput('tenantId');
             const secret = core.getInput('secret');
             const clientId = core.getInput('clientId');
+            core.debug(`imagesToKeep: ${imagesToKeep}`);
+            core.debug(`dontCountUntaggedImages: ${dontCountUntaggedImages}`);
+            core.debug(`endpoint: ${endpoint}`);
+            core.debug(`repos: ${repos}`);
+            core.debug(`has tenantId: ${tenantId && tenantId !== ''}`);
+            core.debug(`has secret: ${secret && secret !== ''}`);
+            core.debug(`has clientId: ${clientId && clientId !== ''}`);
             const client = new container_registry_1.ContainerRegistryClient(endpoint, new identity_1.ClientSecretCredential(tenantId, clientId, secret));
             for (const repoName of repos) {
                 yield core.group(`🔍 Cleanup ${repoName}`, () => __awaiter(this, void 0, void 0, function* () {

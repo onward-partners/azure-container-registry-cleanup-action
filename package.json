@@ -28,7 +28,7 @@
   "dependencies": {
     "@actions/core": "^1.2.6",
     "@azure/container-registry": "^1.0.0-beta.3",
-    "@azure/identity": "^1.5.0"
+    "@azure/identity": "^1.5.1"
   },
   "devDependencies": {
     "@types/jest": "^27.0.0",

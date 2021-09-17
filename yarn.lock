@@ -14,10 +14,10 @@
   dependencies:
     tslib "^2.0.0"
 
-"@azure/container-registry@^1.0.0-beta.4":
-  version "1.0.0-beta.4"
-  resolved "https://registry.yarnpkg.com/@azure/container-registry/-/container-registry-1.0.0-beta.4.tgz#d01d859c2c73025e88fae6669c812f3603c5fb6d"
-  integrity sha512-QXKm9kRvQl8pgky0NVU4Xbyq8A0QHvzrndqFr2cKScUpO6fCLuqMv/O7HFAVr/KyfHFTlL+23a4R3npnRjGyGA==
+"@azure/container-registry@^1.0.0-beta.5":
+  version "1.0.0-beta.5"
+  resolved "https://registry.yarnpkg.com/@azure/container-registry/-/container-registry-1.0.0-beta.5.tgz#2ab52739b6f3b1e3c9b4bba07ae272a9c26ee7fd"
+  integrity sha512-i6paEU7PX4L3CwVe5CD+IWtoj1H6SHvi6c71WKZqrbHsZJ36q3o1xlIOekrYU1ZJwaswlWf03j3u1rlGtHjbAA==
   dependencies:
     "@azure/core-auth" "^1.3.0"
     "@azure/core-client" "^1.0.0"

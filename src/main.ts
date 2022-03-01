@@ -34,7 +34,7 @@ async function run(): Promise<void> {
           const repo = client.getRepository(repoName);
 
           const imageManifests = repo.listManifestProperties({
-            orderBy: 'LastUpdatedOnDescending',
+            order: 'LastUpdatedOnDescending',
           });
           let imageCount = 0;
           let deletedImages = 0;
@@ -59,7 +59,7 @@ async function run(): Promise<void> {
     core.setOutput('count', totalDeletedImages);
   } catch (error) {
     core.info(`Deleted ${ totalDeletedImages } images`);
-    core.setFailed(error);
+    core.setFailed(error as Error);
   }
 }
 

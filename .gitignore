@@ -96,6 +96,6 @@ Thumbs.db
 
 # Ignore built ts files
 __tests__/runner/*
-lib/**/*
+dist
 xdg-open
 keytar.node

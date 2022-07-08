@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
-import { ContainerRegistryClient } from '@azure/container-registry';
+import { ContainerRegistryClient, KnownContainerRegistryAudience } from '@azure/container-registry';
 import { ClientSecretCredential } from '@azure/identity';
+
 
 async function run(): Promise<void> {
   let totalDeletedImages = 0;
@@ -13,18 +14,37 @@ async function run(): Promise<void> {
     const tenantId = core.getInput('tenantId');
     const secret = core.getInput('secret');
     const clientId = core.getInput('clientId');
+    const audienceString = core.getInput('audience');
 
-    core.debug(`imagesToKeep: ${ imagesToKeep }`)
-    core.debug(`dontCountUntaggedImages: ${ dontCountUntaggedImages }`)
-    core.debug(`endpoint: ${ endpoint }`)
-    core.debug(`repos: ${ repos }`)
-    core.debug(`has tenantId: ${ tenantId && tenantId !== '' }`)
-    core.debug(`has secret: ${ secret && secret !== '' }`)
-    core.debug(`has clientId: ${ clientId && clientId !== '' }`)
+    let audience: KnownContainerRegistryAudience;
+    switch (audienceString.toLowerCase()) {
+      case 'china':
+        audience = KnownContainerRegistryAudience.AzureResourceManagerChina;
+        break;
+      case 'germany':
+        audience = KnownContainerRegistryAudience.AzureResourceManagerGermany;
+        break;
+      case 'government':
+        audience = KnownContainerRegistryAudience.AzureResourceManagerGovernment;
+        break;
+      default:
+        audience = KnownContainerRegistryAudience.AzureResourceManagerPublicCloud;
+        break;
+    }
+
+    core.debug(`imagesToKeep: ${ imagesToKeep }`);
+    core.debug(`dontCountUntaggedImages: ${ dontCountUntaggedImages }`);
+    core.debug(`endpoint: ${ endpoint }`);
+    core.debug(`audience: ${ audience }`);
+    core.debug(`repos: ${ repos }`);
+    core.debug(`has tenantId: ${ tenantId && tenantId !== '' }`);
+    core.debug(`has secret: ${ secret && secret !== '' }`);
+    core.debug(`has clientId: ${ clientId && clientId !== '' }`);
 
     const client = new ContainerRegistryClient(
       endpoint,
       new ClientSecretCredential(tenantId, clientId, secret),
+      { audience },
     );
 
     for (const repoName of repos) {

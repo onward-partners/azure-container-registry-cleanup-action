@@ -25,6 +25,10 @@ inputs:
   endpoint:
     required: true
     description: 'Azure Container Registry endpoint'
+  audience:
+    required: false
+    default: PublicCloud
+    description: 'Cloud audience for Azure Container Registry. Possible values: PublicCloud, China, Germany, Government'
 
 runs:
   using: 'node16'

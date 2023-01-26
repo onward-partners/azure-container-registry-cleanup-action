@@ -6,9 +6,8 @@ import { ClientSecretCredential } from '@azure/identity';
 async function run(): Promise<void> {
   let totalDeletedImages = 0;
   try {
-
+    
     const imagesToKeep = parseInt(core.getInput('keep'), 10);
-    const dontCountUntaggedImages = core.getBooleanInput('dontCountUntaggedImages');
     const endpoint = core.getInput('endpoint');
     const repos = core.getInput('repos').split(/[,;\n\s]/).map(r => r.trim()).filter(r => r !== '');
     const tenantId = core.getInput('tenantId');
@@ -33,7 +32,6 @@ async function run(): Promise<void> {
     }
 
     core.debug(`imagesToKeep: ${ imagesToKeep }`);
-    core.debug(`dontCountUntaggedImages: ${ dontCountUntaggedImages }`);
     core.debug(`endpoint: ${ endpoint }`);
     core.debug(`audience: ${ audience }`);
     core.debug(`repos: ${ repos }`);
@@ -53,23 +51,30 @@ async function run(): Promise<void> {
         async () => {
           const repo = client.getRepository(repoName);
 
+          // artifacts must be listed in descending order so that any related manifest will come after it. 
+          // reversing the order could cause a manifest to become corrupted
           const imageManifests = repo.listManifestProperties({
             order: 'LastUpdatedOnDescending',
           });
+
           let imageCount = 0;
           let deletedImages = 0;
+          const artifactsToKeep: string[] = [];
           for await (const manifest of imageManifests) {
-            if ((dontCountUntaggedImages && manifest.tags.length === 0) || imageCount++ >= imagesToKeep) {
-              await repo.getArtifact(manifest.digest).delete();
-              deletedImages++;
-              if (manifest.tags.length > 0) {
-                core.info(`Delete image: ${ manifest.digest } - Tags: ${ manifest.tags }`);
-              } else {
-                core.info(`Delete image: ${ manifest.digest } - Tags: ${ manifest.tags }`);
-              }
+            // get manifest properties to retrieve the related artifacts data
+            const manifestProperties = await repo.getArtifact(manifest.digest).getManifestProperties();
+
+            // retain artifact only if it is tagged and still within the [imagesToKeep] limit or required by another artifact
+            if ((manifest.tags.length && imageCount++ < imagesToKeep) || artifactsToKeep.includes(manifest.digest)) {
+              artifactsToKeep.push(...manifestProperties.relatedArtifacts.map(el => el.digest));
+              continue;
             }
+            
+            await repo.getArtifact(manifest.digest).delete();
+            core.info(`Deleted image: ${ manifest.digest } - Tags: ${ manifest.tags.length ? manifest.tags.join(', ') : '<null>' }`);
+            deletedImages++;
           }
-          core.info(`Deleted ${ deletedImages } image in ${ repoName }`);
+          core.info(`Deleted ${ deletedImages } images in ${ repoName }`);
           totalDeletedImages += deletedImages;
         },
       );
@@ -79,7 +84,7 @@ async function run(): Promise<void> {
     core.setOutput('count', totalDeletedImages);
   } catch (error) {
     core.info(`Deleted ${ totalDeletedImages } images`);
-    core.setFailed(error as Error);
+    core.setFailed(error as Error);;
   }
 }
 

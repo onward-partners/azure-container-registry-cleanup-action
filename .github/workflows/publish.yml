@@ -16,13 +16,13 @@ jobs:
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
         with:
-          version: 7
+          version: 8
 
-      - name: Setup up Node 16 & cache
+      - name: Setup up Node 18 & cache
         uses: actions/setup-node@v3
         with:
-          node-version: 16
-          cache: 'pnpm'
+          node-version: 18
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install

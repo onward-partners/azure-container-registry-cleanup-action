@@ -31,5 +31,5 @@ inputs:
     description: 'Cloud audience for Azure Container Registry. Possible values: PublicCloud, China, Germany, Government'
 
 runs:
-  using: 'node16'
+  using: 'node20'
   main: 'dist/index.js'

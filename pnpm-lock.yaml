@@ -12,8 +12,8 @@ dependencies:
     specifier: ^1.1.0
     version: 1.1.0
   '@azure/identity':
-    specifier: ^4.0.1
-    version: 4.0.1
+    specifier: ^4.2.1
+    version: 4.2.1
 
 devDependencies:
   '@types/node':
@@ -66,7 +66,7 @@ packages:
     resolution: {integrity: sha512-TrRLIoSQVzfAJX9H1JeFjzAoDGcoK1IYX1UImfceTZpsyYfWr09Ss1aHW1y5TrrR3iq6RZLBwJ3E24uwPhwahw==}
     engines: {node: '>=12.0.0'}
     dependencies:
-      tslib: 2.6.0
+      tslib: 2.6.2
     dev: false
 
   /@azure/container-registry@1.1.0:
@@ -90,7 +90,7 @@ packages:
     engines: {node: '>=12.0.0'}
     dependencies:
       '@azure/abort-controller': 1.1.0
-      tslib: 2.6.0
+      tslib: 2.6.2
     dev: false
 
   /@azure/core-auth@1.5.0:
@@ -107,12 +107,12 @@ packages:
     engines: {node: '>=14.0.0'}
     dependencies:
       '@azure/abort-controller': 1.1.0
-      '@azure/core-auth': 1.4.0
-      '@azure/core-rest-pipeline': 1.11.0
+      '@azure/core-auth': 1.5.0
+      '@azure/core-rest-pipeline': 1.13.0
       '@azure/core-tracing': 1.0.1
-      '@azure/core-util': 1.3.2
+      '@azure/core-util': 1.6.1
       '@azure/logger': 1.0.4
-      tslib: 2.6.0
+      tslib: 2.6.2
     transitivePeerDependencies:
       - supports-color
     dev: false
@@ -121,7 +121,7 @@ packages:
     resolution: {integrity: sha512-zqWdVIt+2Z+3wqxEOGzR5hXFZ8MGKK52x4vFLw8n58pR6ZfKRx3EXYTxTaYxYHc/PexPUTyimcTWFJbji9Z6Iw==}
     engines: {node: '>=14.0.0'}
     dependencies:
-      tslib: 2.6.0
+      tslib: 2.6.2
     dev: false
 
   /@azure/core-rest-pipeline@1.11.0:
@@ -129,14 +129,14 @@ packages:
     engines: {node: '>=14.0.0'}
     dependencies:
       '@azure/abort-controller': 1.1.0
-      '@azure/core-auth': 1.4.0
+      '@azure/core-auth': 1.5.0
       '@azure/core-tracing': 1.0.1
-      '@azure/core-util': 1.3.2
+      '@azure/core-util': 1.6.1
       '@azure/logger': 1.0.4
       form-data: 4.0.0
       http-proxy-agent: 5.0.0
       https-proxy-agent: 5.0.1
-      tslib: 2.6.0
+      tslib: 2.6.2
     transitivePeerDependencies:
       - supports-color
     dev: false
@@ -161,15 +161,7 @@ packages:
     resolution: {integrity: sha512-I5CGMoLtX+pI17ZdiFJZgxMJApsK6jjfm85hpgp3oazCdq5Wxgh4wMr7ge/TTWW1B5WBuvIOI1fMU/FrOAMKrw==}
     engines: {node: '>=12.0.0'}
     dependencies:
-      tslib: 2.6.0
-    dev: false
-
-  /@azure/core-util@1.3.2:
-    resolution: {integrity: sha512-2bECOUh88RvL1pMZTcc6OzfobBeWDBf5oBbhjIhT1MV9otMVWCzpOJkkiKtrnO88y5GGBelgY8At73KGAdbkeQ==}
-    engines: {node: '>=14.0.0'}
-    dependencies:
-      '@azure/abort-controller': 1.1.0
-      tslib: 2.6.0
+      tslib: 2.6.2
     dev: false
 
   /@azure/core-util@1.6.1:
@@ -180,8 +172,8 @@ packages:
       tslib: 2.6.2
     dev: false
 
-  /@azure/identity@4.0.1:
-    resolution: {integrity: sha512-yRdgF03SFLqUMZZ1gKWt0cs0fvrDIkq2bJ6Oidqcoo5uM85YMBnXWMzYKK30XqIT76lkFyAaoAAy5knXhrG4Lw==}
+  /@azure/identity@4.2.1:
+    resolution: {integrity: sha512-U8hsyC9YPcEIzoaObJlRDvp7KiF0MGS7xcWbyJSVvXRkC/HXo1f0oYeBYmEvVgRfacw7GHf6D6yAoh9JHz6A5Q==}
     engines: {node: '>=18.0.0'}
     dependencies:
       '@azure/abort-controller': 1.1.0
@@ -191,7 +183,7 @@ packages:
       '@azure/core-tracing': 1.0.1
       '@azure/core-util': 1.6.1
       '@azure/logger': 1.0.4
-      '@azure/msal-browser': 3.7.1
+      '@azure/msal-browser': 3.17.0
       '@azure/msal-node': 2.9.2
       events: 3.3.0
       jws: 4.0.0
@@ -206,23 +198,18 @@ packages:
     resolution: {integrity: sha512-ustrPY8MryhloQj7OWGe+HrYx+aoiOxzbXTtgblbV3xwCqpzUK36phH3XNHQKj3EPonyFUuDTfR3qFhTEAuZEg==}
     engines: {node: '>=14.0.0'}
     dependencies:
-      tslib: 2.6.0
+      tslib: 2.6.2
     dev: false
 
-  /@azure/msal-browser@3.7.1:
-    resolution: {integrity: sha512-EZnk81zn1/5/jv/VVN2Tp+dUVchHmwbbt7pn654Eqa+ua7wtEIg1btuW/mowB13BV2nGYcvniY9Mf+3Sbe0cCg==}
+  /@azure/msal-browser@3.17.0:
+    resolution: {integrity: sha512-csccKXmW2z7EkZ0I3yAoW/offQt+JECdTIV/KrnRoZyM7wCSsQWODpwod8ZhYy7iOyamcHApR9uCh0oD1M+0/A==}
     engines: {node: '>=0.8.0'}
     dependencies:
-      '@azure/msal-common': 14.6.1
+      '@azure/msal-common': 14.12.0
     dev: false
 
   /@azure/msal-common@14.12.0:
     resolution: {integrity: sha512-IDDXmzfdwmDkv4SSmMEyAniJf6fDu3FJ7ncOjlxkDuT85uSnLEhZi3fGZpoR7T4XZpOMx9teM9GXBgrfJgyeBw==}
-    engines: {node: '>=0.8.0'}
-    dev: false
-
-  /@azure/msal-common@14.6.1:
-    resolution: {integrity: sha512-yL97p2La0WrgU3MdXThOLOpdmBMvH8J69vwQ/skOqORYwOW/UYPdp9nZpvvfBO+zFZB5M3JkqA2NKtn4GfVBHw==}
     engines: {node: '>=0.8.0'}
     dev: false
 

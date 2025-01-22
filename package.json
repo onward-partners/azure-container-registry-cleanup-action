@@ -25,13 +25,15 @@
     "@azure/identity": "^4.2.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.10",
-    "@typescript-eslint/parser": "^6.20.0",
+    "@types/node": "^22.10.7",
+    "@typescript-eslint/eslint-plugin": "^8.21.0",
+    "@typescript-eslint/parser": "^8.21.0",
     "@vercel/ncc": "^0.38.1",
-    "eslint": "^8.56.0",
-    "eslint-plugin-github": "^4.10.1",
+    "eslint": "^9.18.0",
+    "eslint-plugin-github": "^5.1.5",
+    "globals": "^15.14.0",
     "js-yaml": "^4.1.0",
-    "prettier": "3.2.4",
-    "typescript": "^5.3.3"
+    "prettier": "3.4.2",
+    "typescript": "^5.7.3"
   }
 }

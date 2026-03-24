@@ -4,7 +4,6 @@ This action gets the apps affected by the changes since the last successful buil
 
 ## Inputs
 
-
 ### `keep`
 
 Amount of images to keep. Default: `3`
@@ -81,5 +80,4 @@ jobs:
           clientId: <Azure-Client-ID>
           repos: repo-a repo-b,repo-c;repo-d
           endpoint: example.azurecr.io
-
 ```

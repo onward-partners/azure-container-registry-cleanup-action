@@ -2,7 +2,6 @@
   "name": "@i40mc/azure-container-registry-cleanup-action",
   "private": true,
   "description": "This action cleans up old image tags in an Azure Container Registry",
-  "main": "dist/index.js",
   "scripts": {
     "bundle": "npm run format:write && npm run package",
     "format:check": "prettier --check .",
@@ -11,6 +10,7 @@
     "package": "npx rimraf ./dist && npx rollup --config rollup.config.ts --configPlugin @rollup/plugin-typescript",
     "package:watch": "npm run package -- --watch"
   },
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/i40mc/azure-container-registry-cleanup-action.git"

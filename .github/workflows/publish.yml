@@ -28,7 +28,7 @@ jobs:
         run: pnpm install
 
       - name: Build action
-        run: pnpm run bundle
+        run: pnpm run package
 
       - uses: JasonEtco/build-and-tag-action@v2
         env:

@@ -1,45 +1,45 @@
-import require$$5$5 from 'assert';
-import require$$0$8 from 'buffer';
+import * as os from 'os';
+import os__default from 'os';
 import * as crypto$1 from 'crypto';
 import crypto__default from 'crypto';
-import events$1 from 'events';
 import * as fs from 'fs';
 import { promises } from 'fs';
 import 'path';
 import http from 'http';
 import https from 'https';
 import require$$0$7 from 'net';
+import require$$1 from 'tls';
+import events$1 from 'events';
+import require$$5$5 from 'assert';
+import require$$5 from 'util';
 import require$$0$1 from 'node:assert';
-import require$$5$3 from 'node:async_hooks';
-import require$$0 from 'node:buffer';
-import require$$1$3 from 'node:console';
-import require$$0$5 from 'node:diagnostics_channel';
-import require$$1$4 from 'node:dns';
-import require$$8 from 'node:events';
-import http$1 from 'node:http';
-import https$1 from 'node:https';
 import require$$0$3 from 'node:net';
-import os$1, { EOL } from 'node:os';
-import require$$5$2 from 'node:perf_hooks';
-import process$1 from 'node:process';
-import require$$7 from 'node:querystring';
+import http$1 from 'node:http';
 import require$$0$2, { Transform } from 'node:stream';
-import require$$5$1 from 'node:tls';
-import require$$1$2 from 'node:url';
+import require$$0 from 'node:buffer';
 import require$$0$4, { inspect } from 'node:util';
+import require$$7 from 'node:querystring';
+import require$$8 from 'node:events';
+import require$$0$5 from 'node:diagnostics_channel';
+import require$$5$1 from 'node:tls';
+import zlib from 'node:zlib';
+import require$$5$2 from 'node:perf_hooks';
 import require$$8$1 from 'node:util/types';
 import require$$1$1 from 'node:worker_threads';
-import zlib from 'node:zlib';
-import * as os from 'os';
-import os__default from 'os';
-import require$$3, { Readable } from 'stream';
+import require$$1$2 from 'node:url';
+import require$$5$3 from 'node:async_hooks';
+import require$$1$3 from 'node:console';
+import require$$1$4 from 'node:dns';
 import require$$5$4 from 'string_decoder';
 import 'child_process';
 import 'timers';
-import require$$1 from 'tls';
+import os$1, { EOL } from 'node:os';
+import process$1 from 'node:process';
+import require$$3, { Readable } from 'stream';
 import require$$0$6 from 'tty';
 import require$$5$6 from 'url';
-import require$$5 from 'util';
+import https$1 from 'node:https';
+import require$$0$8 from 'buffer';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -3602,7 +3602,7 @@ function requireUtils () {
 	    return res;
 	}
 	utils.enumToMap = enumToMap;
-
+	
 	return utils;
 }
 
@@ -3882,7 +3882,7 @@ function requireConstants$4 () {
 		    'transfer-encoding': HEADER_STATE.TRANSFER_ENCODING,
 		    'upgrade': HEADER_STATE.UPGRADE,
 		};
-
+		
 	} (constants$4));
 	return constants$4;
 }
@@ -31044,7 +31044,7 @@ function requireBrowser () {
 			} catch (error) {
 				return '[UnexpectedJSONParseError]: ' + error.message;
 			}
-		};
+		}; 
 	} (browser, browser.exports));
 	return browser.exports;
 }
@@ -31319,7 +31319,7 @@ function requireNode () {
 		formatters.O = function (v) {
 			this.inspectOpts.colors = this.useColors;
 			return util.inspect(v, this.inspectOpts);
-		};
+		}; 
 	} (node, node.exports));
 	return node.exports;
 }
@@ -31415,7 +31415,7 @@ function requireHelpers () {
 	    return req;
 	}
 	helpers.req = req;
-
+	
 	return helpers;
 }
 
@@ -31601,7 +31601,7 @@ function requireDist$2 () {
 		    }
 		}
 		exports$1.Agent = Agent;
-
+		
 	} (dist$1));
 	return dist$1;
 }
@@ -31712,7 +31712,7 @@ function requireParseProxyResponse () {
 	    });
 	}
 	parseProxyResponse.parseProxyResponse = parseProxyResponse$1;
-
+	
 	return parseProxyResponse;
 }
 
@@ -31899,7 +31899,7 @@ function requireDist$1 () {
 	    }
 	    return ret;
 	}
-
+	
 	return dist$2;
 }
 
@@ -32058,7 +32058,7 @@ function requireDist () {
 	    }
 	    return ret;
 	}
-
+	
 	return dist;
 }
 
@@ -32814,7 +32814,7 @@ function requireState$1 () {
 	state$3.state = {
 	    instrumenterImplementation: undefined,
 	};
-
+	
 	return state$3;
 }
 
@@ -33354,7 +33354,7 @@ function createTokenCycler$1(credential, tokenCyclerOptions) {
             const tryGetAccessToken = () => credential.getToken(scopes, getTokenOptions);
             // Take advantage of promise chaining to insert an assignment to `token`
             // before the refresh can be considered done.
-            refreshWorker = beginRefresh$1(tryGetAccessToken, options.retryIntervalInMs,
+            refreshWorker = beginRefresh$1(tryGetAccessToken, options.retryIntervalInMs, 
             // If we don't have a token, then we should timeout immediately
             token?.expiresOnTimestamp ?? Date.now())
                 .then((_token) => {
@@ -34739,7 +34739,7 @@ function requireState () {
 	state$1.state = {
 	    operationRequestMap: new WeakMap(),
 	};
-
+	
 	return state$1;
 }
 
@@ -49118,7 +49118,7 @@ function requireSafeBuffer () {
 		    throw new TypeError('Argument must be a number')
 		  }
 		  return buffer.SlowBuffer(size)
-		};
+		}; 
 	} (safeBuffer, safeBuffer.exports));
 	return safeBuffer.exports;
 }
@@ -50442,7 +50442,7 @@ function requireRe () {
 		createToken('STAR', '(<|>)?=?\\s*\\*');
 		// >=0.0.0 is like a star
 		createToken('GTE0', '^\\s*>=\\s*0\\.0\\.0\\s*$');
-		createToken('GTE0PRE', '^\\s*>=\\s*0\\.0\\.0-0\\s*$');
+		createToken('GTE0PRE', '^\\s*>=\\s*0\\.0\\.0-0\\s*$'); 
 	} (re, re.exports));
 	return re.exports;
 }

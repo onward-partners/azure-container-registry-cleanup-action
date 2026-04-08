@@ -1,12 +1,12 @@
-import { Buffer } from 'node:buffer';
-import childProcess, { execFile as execFile$1 } from 'node:child_process';
-import fs from 'node:fs';
-import fs$1, { constants } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import process from 'node:process';
+import { Buffer } from 'node:buffer';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import childProcess, { execFile as execFile$1 } from 'node:child_process';
+import fs$1, { constants } from 'node:fs/promises';
+import os from 'node:os';
+import fs from 'node:fs';
 
 let isDockerCached;
 

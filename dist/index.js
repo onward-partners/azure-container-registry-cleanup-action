@@ -1,23 +1,25 @@
 import * as os from 'os';
 import os__default from 'os';
-import * as crypto$1 from 'crypto';
+import * as crypto from 'crypto';
 import crypto__default, { createHash } from 'crypto';
 import * as fs from 'fs';
 import { promises } from 'fs';
 import 'path';
-import http from 'http';
-import https from 'https';
-import require$$0$7 from 'net';
-import require$$1 from 'tls';
-import events$1 from 'events';
+import * as http from 'http';
+import http__default from 'http';
+import https, { Agent as Agent$1 } from 'https';
+import * as net from 'net';
+import * as tls from 'tls';
+import tls__default from 'tls';
+import events$1, { once } from 'events';
 import require$$5$5 from 'assert';
 import require$$5 from 'util';
 import require$$0$1 from 'node:assert';
 import require$$0$3 from 'node:net';
 import http$1 from 'node:http';
-import require$$0$2, { Transform } from 'node:stream';
+import require$$0$2, { Transform, finished } from 'node:stream';
 import require$$0 from 'node:buffer';
-import require$$0$4, { inspect } from 'node:util';
+import require$$0$4, { inspect, types } from 'node:util';
 import require$$7 from 'node:querystring';
 import require$$8 from 'node:events';
 import require$$0$5 from 'node:diagnostics_channel';
@@ -25,11 +27,11 @@ import require$$5$1 from 'node:tls';
 import zlib from 'node:zlib';
 import require$$5$2 from 'node:perf_hooks';
 import require$$8$1 from 'node:util/types';
-import require$$1$1 from 'node:worker_threads';
-import require$$1$2 from 'node:url';
+import require$$1 from 'node:worker_threads';
+import require$$1$1 from 'node:url';
 import require$$5$3 from 'node:async_hooks';
-import require$$1$3 from 'node:console';
-import require$$1$4 from 'node:dns';
+import require$$1$2 from 'node:console';
+import require$$1$3 from 'node:dns';
 import require$$5$4 from 'string_decoder';
 import 'child_process';
 import 'timers';
@@ -37,10 +39,10 @@ import os$1, { EOL } from 'node:os';
 import process$1 from 'node:process';
 import require$$3, { Readable } from 'stream';
 import require$$0$6 from 'tty';
-import require$$5$6 from 'url';
+import { URL as URL$1 } from 'url';
 import https$1 from 'node:https';
-import { randomUUID as randomUUID$2 } from 'node:crypto';
-import require$$0$8 from 'buffer';
+import { randomUUID as randomUUID$1 } from 'node:crypto';
+import require$$0$7 from 'buffer';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -182,7 +184,7 @@ function issueFileCommand(command, message) {
     });
 }
 function prepareKeyValueMessage(key, value) {
-    const delimiter = `ghadelimiter_${crypto$1.randomUUID()}`;
+    const delimiter = `ghadelimiter_${crypto.randomUUID()}`;
     const convertedValue = toCommandValue(value);
     // These should realistically never happen, but just in case someone finds a
     // way to exploit uuid generation let's not allow keys or values that contain
@@ -209,8 +211,8 @@ var hasRequiredTunnel$1;
 function requireTunnel$1 () {
 	if (hasRequiredTunnel$1) return tunnel$1;
 	hasRequiredTunnel$1 = 1;
-	var tls = require$$1;
-	var http$1 = http;
+	var tls = tls__default;
+	var http = http__default;
 	var https$1 = https;
 	var events = events$1;
 	var util = require$$5;
@@ -224,13 +226,13 @@ function requireTunnel$1 () {
 
 	function httpOverHttp(options) {
 	  var agent = new TunnelingAgent(options);
-	  agent.request = http$1.request;
+	  agent.request = http.request;
 	  return agent;
 	}
 
 	function httpsOverHttp(options) {
 	  var agent = new TunnelingAgent(options);
-	  agent.request = http$1.request;
+	  agent.request = http.request;
 	  agent.createSocket = createSecureSocket;
 	  agent.defaultPort = 443;
 	  return agent;
@@ -255,7 +257,7 @@ function requireTunnel$1 () {
 	  var self = this;
 	  self.options = options || {};
 	  self.proxyOptions = self.options.proxy || {};
-	  self.maxSockets = self.options.maxSockets || http$1.Agent.defaultMaxSockets;
+	  self.maxSockets = self.options.maxSockets || http.Agent.defaultMaxSockets;
 	  self.requests = [];
 	  self.sockets = [];
 
@@ -2488,11 +2490,77 @@ function requireRequest$1 () {
 	    }
 	  }
 
-	  onUpgrade (statusCode, headers, socket) {
+	  /**
+	   * @param {number|null} statusCode
+	   * @param {Buffer[]|null} headers
+	   * @param {import('node:stream').Duplex} socket
+	   * @param {string} [statusText]
+	   */
+	  onUpgrade (statusCode, headers, socket, statusText = '') {
+	    this.onFinally();
+
 	    assert(!this.aborted);
 	    assert(!this.completed);
 
-	    return this[kHandler].onUpgrade(statusCode, headers, socket)
+	    if (statusCode !== null) {
+	      this.#publishUpgradeHeaders(statusCode, headers, statusText);
+	    }
+
+	    const result = this[kHandler].onUpgrade(statusCode, headers, socket);
+
+	    if (!this.aborted) {
+	      this.completed = true;
+	      if (statusCode !== null) {
+	        this.#publishUpgradeTrailers();
+	      }
+	    }
+
+	    return result
+	  }
+
+	  /**
+	   * @param {number} statusCode
+	   * @param {import('node:http2').IncomingHttpHeaders} headers
+	   * @param {(headers: import('node:http2').IncomingHttpHeaders) => Buffer[]} parseHeaders
+	   * @param {string} [statusText]
+	   */
+	  onUpgradeResponse (statusCode, headers, parseHeaders, statusText = '') {
+	    assert(!this.aborted);
+	    assert(this.completed);
+
+	    if (channels.headers.hasSubscribers) {
+	      this.#publishUpgradeHeaders(statusCode, parseHeaders(headers), statusText);
+	    }
+	    this.#publishUpgradeTrailers();
+	  }
+
+	  /**
+	   * @param {Error} error
+	   */
+	  onUpgradeError (error) {
+	    assert(!this.aborted);
+	    assert(this.completed);
+
+	    if (channels.error.hasSubscribers) {
+	      channels.error.publish({ request: this, error });
+	    }
+	  }
+
+	  /**
+	   * @param {number} statusCode
+	   * @param {Buffer[]} headers
+	   * @param {string} statusText
+	   */
+	  #publishUpgradeHeaders (statusCode, headers, statusText) {
+	    if (channels.headers.hasSubscribers) {
+	      channels.headers.publish({ request: this, response: { statusCode, headers, statusText } });
+	    }
+	  }
+
+	  #publishUpgradeTrailers () {
+	    if (channels.trailers.hasSubscribers) {
+	      channels.trailers.publish({ request: this, trailers: [] });
+	    }
 	  }
 
 	  onComplete (trailers) {
@@ -2722,6 +2790,7 @@ function requireDispatcherBase () {
 	if (hasRequiredDispatcherBase) return dispatcherBase;
 	hasRequiredDispatcherBase = 1;
 
+	const buffer = require$$0;
 	const Dispatcher = requireDispatcher();
 	const {
 	  ClientDestroyedError,
@@ -2734,6 +2803,7 @@ function requireDispatcherBase () {
 	const kOnClosed = Symbol('onClosed');
 	const kInterceptedDispatch = Symbol('Intercepted Dispatch');
 	const kWebSocketOptions = Symbol('webSocketOptions');
+	const kEventSourceOptions = Symbol('eventSourceOptions');
 
 	class DispatcherBase extends Dispatcher {
 	  constructor (opts) {
@@ -2744,12 +2814,19 @@ function requireDispatcherBase () {
 	    this[kClosed] = false;
 	    this[kOnClosed] = [];
 	    this[kWebSocketOptions] = opts?.webSocket ?? {};
+	    this[kEventSourceOptions] = opts?.eventSource ?? {};
 	  }
 
 	  get webSocketOptions () {
 	    return {
 	      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
 	      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+	    }
+	  }
+
+	  get eventSourceOptions () {
+	    return {
+	      maxEventSize: this[kEventSourceOptions].maxEventSize ?? buffer.kStringMaxLength
 	    }
 	  }
 
@@ -4874,7 +4951,7 @@ function requireWebidl () {
 	hasRequiredWebidl = 1;
 
 	const { types, inspect } = require$$0$4;
-	const { markAsUncloneable } = require$$1$1;
+	const { markAsUncloneable } = require$$1;
 	const { toUSVString } = requireUtil$7();
 
 	/** @type {import('../../../types/webidl').Webidl} */
@@ -9075,7 +9152,7 @@ function requireClientH1 () {
 	  }
 
 	  onUpgrade (head) {
-	    const { upgrade, client, socket, headers, statusCode } = this;
+	    const { upgrade, client, socket, headers, statusCode, statusText } = this;
 
 	    assert(upgrade);
 	    assert(client[kSocket] === socket);
@@ -9110,9 +9187,10 @@ function requireClientH1 () {
 	    client.emit('disconnect', client[kUrl], [client], new InformationalError('upgrade'));
 
 	    try {
-	      request.onUpgrade(statusCode, headers, socket);
-	    } catch (err) {
-	      util.destroy(socket, err);
+	      request.onUpgrade(statusCode, headers, socket, statusText);
+	    } catch (error) {
+	      util.errorRequest(client, request, error);
+	      util.destroy(socket, error);
 	    }
 
 	    client[kResume]();
@@ -9369,8 +9447,6 @@ function requireClientH1 () {
 	  socket[kParser] = new Parser(client, socket, llhttpInstance);
 
 	  addListener(socket, 'error', function (err) {
-	    assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	    const parser = this[kParser];
 
 	    // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
@@ -9519,7 +9595,7 @@ function requireClientH1 () {
 
 	function clearIdleSocketValidation (socket) {
 	  if (socket[kIdleSocketValidationTimeout]) {
-	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    clearImmediate(socket[kIdleSocketValidationTimeout]);
 	    socket[kIdleSocketValidationTimeout] = null;
 	  }
 
@@ -9528,15 +9604,23 @@ function requireClientH1 () {
 
 	function scheduleIdleSocketValidation (client, socket) {
 	  socket[kIdleSocketValidation] = 1;
-	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	  // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+	  // already pending on this idle keep-alive socket are processed before the
+	  // next request is written (GHSA-35p6-xmwp-9g52).
+	  //
+	  // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+	  // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+	  // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+	  // A ref'd Immediate both keeps the pending request alive and makes poll
+	  // return immediately — the hybrid those issues asked for.
+	  socket[kIdleSocketValidationTimeout] = setImmediate(() => {
 	    socket[kIdleSocketValidationTimeout] = null;
 	    socket[kIdleSocketValidation] = 2;
 
 	    if (client[kSocket] === socket && !socket.destroyed) {
 	      client[kResume]();
 	    }
-	  }, 0);
-	  socket[kIdleSocketValidationTimeout].unref?.();
+	  });
 	}
 
 	/**
@@ -9685,12 +9769,22 @@ function requireClientH1 () {
 	  const socket = client[kSocket];
 	  clearIdleSocketValidation(socket);
 
-	  const abort = (err) => {
-	    if (request.aborted || request.completed) {
+	  /**
+	   * @param {Error} [error]
+	   */
+	  const abort = (error) => {
+	    if (request.aborted) {
 	      return
 	    }
 
-	    util.errorRequest(client, request, err || new RequestAbortedError());
+	    if (request.completed) {
+	      if (request.upgrade || request.method === 'CONNECT') {
+	        util.destroy(socket, new InformationalError('aborted'));
+	      }
+	      return
+	    }
+
+	    util.errorRequest(client, request, error || new RequestAbortedError());
 
 	    util.destroy(body);
 	    util.destroy(socket, new InformationalError('aborted'));
@@ -10148,6 +10242,7 @@ function requireClientH2 () {
 	hasRequiredClientH2 = 1;
 
 	const assert = require$$0$1;
+	const { errorMonitor } = require$$8;
 	const { pipeline } = require$$0$2;
 	const util = requireUtil$7();
 	const {
@@ -10224,6 +10319,15 @@ function requireClientH2 () {
 	  return result
 	}
 
+	/**
+	 * @param {import('node:http2').IncomingHttpHeaders} headers
+	 * @returns {Buffer[]}
+	 */
+	function parseH2ResponseHeaders (headers) {
+	  const { [HTTP2_HEADER_STATUS]: _statusCode, ...realHeaders } = headers;
+	  return parseH2Headers(realHeaders)
+	}
+
 	async function connectH2 (client, socket) {
 	  client[kSocket] = socket;
 
@@ -10273,8 +10377,6 @@ function requireClientH2 () {
 	  socket[kHTTP2Session] = session;
 
 	  util.addListener(socket, 'error', function (err) {
-	    assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	    this[kError] = err;
 
 	    this[kClient][kOnError](err);
@@ -10348,8 +10450,6 @@ function requireClientH2 () {
 	}
 
 	function onHttp2SessionError (err) {
-	  assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	  this[kSocket][kError] = err;
 	  this[kClient][kOnError](err);
 	}
@@ -10444,22 +10544,32 @@ function requireClientH2 () {
 	  headers[HTTP2_HEADER_AUTHORITY] = host || `${hostname}${port ? `:${port}` : ''}`;
 	  headers[HTTP2_HEADER_METHOD] = method;
 
-	  const abort = (err) => {
-	    if (request.aborted || request.completed) {
+	  /**
+	   * @param {Error} [error]
+	   */
+	  const abort = (error) => {
+	    if (request.aborted) {
 	      return
 	    }
 
-	    err = err || new RequestAbortedError();
+	    if (request.completed) {
+	      if (method === 'CONNECT' && stream != null) {
+	        util.destroy(stream, error || new RequestAbortedError());
+	      }
+	      return
+	    }
 
-	    util.errorRequest(client, request, err);
+	    error = error || new RequestAbortedError();
+
+	    util.errorRequest(client, request, error);
 
 	    if (stream != null) {
-	      util.destroy(stream, err);
+	      util.destroy(stream, error);
 	    }
 
 	    // We do not destroy the socket as we can continue using the session
 	    // the stream get's destroyed and the session remains to create new streams
-	    util.destroy(body, err);
+	    util.destroy(body, error);
 	    client[kQueue][client[kRunningIdx]++] = null;
 	    client[kResume]();
 	  };
@@ -10478,25 +10588,57 @@ function requireClientH2 () {
 
 	  if (method === 'CONNECT') {
 	    session.ref();
-	    // We are already connected, streams are pending, first request
-	    // will create a new stream. We trigger a request to create the stream and wait until
-	    // `ready` event is triggered
 	    // We disabled endStream to allow the user to write to the stream
 	    stream = session.request(headers, { endStream: false, signal });
+	    let upgradeResponseFinished = false;
 
-	    if (stream.id && !stream.pending) {
-	      request.onUpgrade(null, null, stream);
-	      ++session[kOpenStreams];
-	      client[kQueue][client[kRunningIdx]++] = null;
-	    } else {
-	      stream.once('ready', () => {
+	    /**
+	     * @param {import('node:http2').IncomingHttpHeaders} headers
+	     */
+	    const onResponse = (headers) => {
+	      upgradeResponseFinished = true;
+	      stream.off(errorMonitor, onUpgradeError);
+	      request.onUpgradeResponse(Number(headers[HTTP2_HEADER_STATUS]), headers, parseH2ResponseHeaders);
+	    };
+
+	    /**
+	     * @param {Error} error
+	     */
+	    const onUpgradeError = (error) => {
+	      upgradeResponseFinished = true;
+	      stream.off('response', onResponse);
+	      request.onUpgradeError(error);
+	    };
+
+	    const onReady = () => {
+	      try {
 	        request.onUpgrade(null, null, stream);
-	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
-	      });
-	    }
+	      } catch (error) {
+	        stream.off('response', onResponse);
+	        abort(error);
+	        return
+	      }
+
+	      if (request.aborted) {
+	        return
+	      }
+
+	      stream.off('error', abort);
+	      stream.once(errorMonitor, onUpgradeError);
+	      client[kQueue][client[kRunningIdx]++] = null;
+	    };
+
+	    stream.once('response', onResponse);
+	    stream.once('error', abort);
+	    ++session[kOpenStreams];
+	    onReady();
 
 	    stream.once('close', () => {
+	      if (!upgradeResponseFinished && request.completed) {
+	        stream.off('response', onResponse);
+	        stream.off(errorMonitor, onUpgradeError);
+	        request.onUpgradeError(new InformationalError(`HTTP/2: "stream error" received - code ${stream.rstCode}`));
+	      }
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
 	    });
@@ -11255,9 +11397,10 @@ function requireClient () {
 	    // h2
 	    maxConcurrentStreams,
 	    allowH2,
-	    webSocket
+	    webSocket,
+	    eventSource
 	  } = {}) {
-	    super({ webSocket });
+	    super({ webSocket, eventSource });
 
 	    if (keepAlive !== undefined) {
 	      throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -12502,7 +12645,7 @@ function requireAgent () {
 	}
 
 	class Agent extends DispatcherBase {
-	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, ...options } = {}) {
+	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, tls, ...options } = {}) {
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
@@ -12521,11 +12664,15 @@ function requireAgent () {
 	      connect = { ...connect };
 	    }
 
+	    if (tls && typeof tls !== 'function') {
+	      tls = { ...tls };
+	    }
+
 	    this[kInterceptors] = options.interceptors?.Agent && Array.isArray(options.interceptors.Agent)
 	      ? options.interceptors.Agent
 	      : [createRedirectInterceptor({ maxRedirections })];
 
-	    this[kOptions] = { ...util.deepClone(options), connect };
+	    this[kOptions] = { ...util.deepClone(options), connect, tls };
 	    this[kOptions].interceptors = options.interceptors
 	      ? { ...options.interceptors }
 	      : undefined;
@@ -12617,7 +12764,7 @@ function requireProxyAgent () {
 	hasRequiredProxyAgent = 1;
 
 	const { kProxy, kClose, kDestroy, kDispatch, kInterceptors } = requireSymbols$4();
-	const { URL } = require$$1$2;
+	const { URL } = require$$1$1;
 	const Agent = requireAgent();
 	const Pool = requirePool();
 	const DispatcherBase = requireDispatcherBase();
@@ -13156,6 +13303,7 @@ function requireRetryHandler () {
 	    this.end = null;
 	    this.etag = null;
 	    this.resume = null;
+	    this.headersSent = false;
 
 	    // Handle possible onConnect duplication
 	    this.handler.onConnect(reason => {
@@ -13166,6 +13314,20 @@ function requireRetryHandler () {
 	        this.reason = reason;
 	      }
 	    });
+	  }
+
+	  checkpointResponseEnd (headers, resume) {
+	    if (this.end == null && this.opts.method !== 'HEAD') {
+	      const contentLength = headers['content-length'];
+	      this.end = contentLength != null ? Number(contentLength) - 1 : null;
+
+	      assert(
+	        this.end == null || Number.isFinite(this.end),
+	        'invalid content-length'
+	      );
+	    }
+
+	    this.resume = this.end != null ? resume : null;
 	  }
 
 	  onRequestSent () {
@@ -13256,7 +13418,12 @@ function requireRetryHandler () {
 	    this.retryCount += 1;
 
 	    if (statusCode >= 300) {
-	      if (this.retryOpts.statusCodes.includes(statusCode) === false) {
+	      // Only expose a response if no earlier attempt has reached the caller.
+	      // Otherwise abort this attempt so the error settles the existing body
+	      // instead of replacing it with a new response.
+	      if (!this.headersSent && this.retryOpts.statusCodes.includes(statusCode) === false) {
+	        this.headersSent = true;
+	        this.checkpointResponseEnd(headers, resume);
 	        return this.handler.onHeaders(
 	          statusCode,
 	          rawHeaders,
@@ -13325,8 +13492,15 @@ function requireRetryHandler () {
 
 	      const { start, size, end = size - 1 } = contentRange;
 
-	      assert(this.start === start, 'content-range mismatch');
-	      assert(this.end == null || this.end === end, 'content-range mismatch');
+	      if (this.start !== start || (this.end != null && this.end !== end)) {
+	        this.abort(
+	          new RequestRetryError('Content-Range mismatch', statusCode, {
+	            headers,
+	            data: { count: this.retryCount }
+	          })
+	        );
+	        return false
+	      }
 
 	      this.resume = resume;
 	      return true
@@ -13338,6 +13512,7 @@ function requireRetryHandler () {
 	        const range = parseRangeHeader(headers['content-range']);
 
 	        if (range == null) {
+	          this.headersSent = true;
 	          return this.handler.onHeaders(
 	            statusCode,
 	            rawHeaders,
@@ -13376,6 +13551,7 @@ function requireRetryHandler () {
 	      );
 
 	      this.resume = resume;
+	      this.headersSent = true;
 	      this.etag = headers.etag != null ? headers.etag : null;
 
 	      // Weak etags are not useful for comparison nor cache
@@ -13415,7 +13591,7 @@ function requireRetryHandler () {
 	  }
 
 	  onError (err) {
-	    if (this.aborted || isDisturbed(this.opts.body)) {
+	    if (this.aborted || isDisturbed(this.opts.body) || (this.headersSent && this.resume == null)) {
 	      return this.handler.onError(err)
 	    }
 
@@ -15872,7 +16048,7 @@ function requirePendingInterceptorsFormatter () {
 	hasRequiredPendingInterceptorsFormatter = 1;
 
 	const { Transform } = require$$0$2;
-	const { Console } = require$$1$3;
+	const { Console } = require$$1$2;
 
 	const PERSISTENT = process.versions.icu ? '✅' : 'Y ';
 	const NOT_PERSISTENT = process.versions.icu ? '❌' : 'N ';
@@ -16372,7 +16548,7 @@ function requireDns () {
 	if (hasRequiredDns) return dns;
 	hasRequiredDns = 1;
 	const { isIP } = require$$0$3;
-	const { lookup } = require$$1$4;
+	const { lookup } = require$$1$3;
 	const DecoratorHandler = requireDecoratorHandler();
 	const { InvalidArgumentError, InformationalError } = requireErrors();
 	const maxInt = Math.pow(2, 31) - 1;
@@ -21039,8 +21215,10 @@ function requireFetch () {
 	  // 19. Run these steps in parallel:
 
 	  //    1. Run these steps, but abort when fetchParams is canceled:
-	  fetchParams.controller.onAborted = onAborted;
-	  fetchParams.controller.on('terminated', onAborted);
+	  if (!fetchParams.controller.resume) {
+	    fetchParams.controller.on('terminated', onAborted);
+	  }
+
 	  fetchParams.controller.resume = async () => {
 	    // 1. While true
 	    while (true) {
@@ -21209,8 +21387,6 @@ function requireFetch () {
 	          }
 	          location = headersList.get('location', true);
 
-	          this.body = new Readable({ read: resume });
-
 	          const decoders = [];
 
 	          const willFollow = location && request.redirect === 'follow' &&
@@ -21228,7 +21404,7 @@ function requireFetch () {
 	            // CVE fix similar to urllib3 (GHSA-gm62-xv2j-4w53) and curl (CVE-2022-32206).
 	            const maxContentEncodings = 5;
 	            if (codings.length > maxContentEncodings) {
-	              reject(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
+	              this.abort(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
 	              return true
 	            }
 
@@ -21260,6 +21436,8 @@ function requireFetch () {
 	              }
 	            }
 	          }
+
+	          this.body = new Readable({ read: resume });
 
 	          const onError = this.onError.bind(this);
 
@@ -21305,10 +21483,6 @@ function requireFetch () {
 	        onComplete () {
 	          if (this.abort) {
 	            fetchParams.controller.off('terminated', this.abort);
-	          }
-
-	          if (fetchParams.controller.onAborted) {
-	            fetchParams.controller.off('terminated', fetchParams.controller.onAborted);
 	          }
 
 	          fetchParams.controller.ended = true;
@@ -23988,11 +24162,11 @@ function requireUtil$2 () {
 	return util$2;
 }
 
-var parse$2;
+var parse$1;
 var hasRequiredParse$1;
 
 function requireParse$1 () {
-	if (hasRequiredParse$1) return parse$2;
+	if (hasRequiredParse$1) return parse$1;
 	hasRequiredParse$1 = 1;
 
 	const { maxNameValuePairSize, maxAttributeValueSize } = requireConstants$2();
@@ -24299,11 +24473,11 @@ function requireParse$1 () {
 	  return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList)
 	}
 
-	parse$2 = {
+	parse$1 = {
 	  parseSetCookie,
 	  parseUnparsedAttributes
 	};
-	return parse$2;
+	return parse$1;
 }
 
 var cookies;
@@ -24508,7 +24682,7 @@ function requireEvents () {
 	const { webidl } = requireWebidl();
 	const { kEnumerableProperty } = requireUtil$7();
 	const { kConstruct } = requireSymbols$4();
-	const { MessagePort } = require$$1$1;
+	const { MessagePort } = require$$1;
 
 	/**
 	 * @see https://html.spec.whatwg.org/multipage/comms.html#messageevent
@@ -25562,7 +25736,7 @@ function requireConnection () {
 	        // is specified, the server needs to include the same field and one of
 	        // the selected subprotocol values in its response for the connection to
 	        // be established.
-	        if (!requestProtocols.includes(secProtocol)) {
+	        if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
 	          failWebsocketConnection(ws, 'Protocol was not set in the opening handshake.');
 	          return
 	        }
@@ -25809,7 +25983,12 @@ function requirePermessageDeflate () {
 
 	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
 	          callback(new MessageSizeExceededError());
+	          // The inflater may still hold buffered input that can emit a late
+	          // zlib error. Remove the data listener, then deterministically stop
+	          // the stream so a subsequent 'error' cannot fire without a listener
+	          // (which would terminate the process as an unhandled error event).
 	          this.#inflate.removeAllListeners();
+	          this.#inflate.destroy();
 	          this.#inflate = null;
 	          return
 	        }
@@ -26103,6 +26282,20 @@ function requireReceiver () {
 	        if (isControlFrame(this.#info.opcode)) {
 	          this.#loop = this.parseControlFrame(body);
 	          this.#state = parserStates.INFO;
+
+	          // If the automatic PONG/CLOSE reply filled the socket's write buffer,
+	          // stop parsing and resume on drain so a PING flood cannot grow the
+	          // outbound queue without bound.
+	          const socket = this.ws[kResponse].socket;
+	          if (this.#loop && socket.writableNeedDrain) {
+	            this.#loop = false;
+	            socket.once('drain', () => {
+	              if (this.destroyed) return
+	              this.#loop = true;
+	              this.run(callback);
+	            });
+	            return
+	          }
 	        } else {
 	          if (!this.#info.compressed) {
 	            if (!this.writeFragments(body)) {
@@ -27134,6 +27327,7 @@ var hasRequiredEventsourceStream;
 function requireEventsourceStream () {
 	if (hasRequiredEventsourceStream) return eventsourceStream;
 	hasRequiredEventsourceStream = 1;
+	const buffer = require$$0;
 	const { Transform } = require$$0$2;
 	const { isASCIINumber, isValidLastEventId } = requireUtil();
 
@@ -27157,6 +27351,63 @@ function requireEventsourceStream () {
 	 * @type {32} SPACE
 	 */
 	const SPACE = 0x20;
+
+	const defaultMaxEventSize = buffer.kStringMaxLength;
+
+	const DATA = Buffer.from('data');
+	const EVENT = Buffer.from('event');
+	const ID = Buffer.from('id');
+	const RETRY = Buffer.from('retry');
+
+	// Each data field creates a string node, and each unconsumed input chunk keeps
+	// a Buffer wrapper. The absolute ceiling protects the large default byte limit.
+	const minParserItems = 1024;
+	const maxParserItems = 131072;
+	const bytesPerParserItem = 128;
+
+	function isASCIINumberBytes (buffer, start) {
+	  if (start >= buffer.length) {
+	    return false
+	  }
+
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isValidLastEventIdBytes (buffer, start) {
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] === 0x00) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isFieldName (line, length, field) {
+	  if (length !== field.length) {
+	    return false
+	  }
+
+	  for (let i = 0; i < length; i++) {
+	    if (line[i] !== field[i]) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function createMaxEventSizeExceededError () {
+	  const error = new Error('EventSource message size exceeded');
+	  error.aborted = false;
+	  return error
+	}
 
 	/**
 	 * @typedef {object} EventSourceStreamEvent
@@ -27198,11 +27449,21 @@ function requireEventsourceStream () {
 	  eventEndCheck = false
 
 	  /**
-	   * @type {Buffer}
+	   * @type {Buffer[]}
 	   */
-	  buffer = null
+	  chunks = []
 
+	  chunkIndex = 0
 	  pos = 0
+	  lineChunkIndex = 0
+	  linePos = 0
+	  lineLength = 0
+	  eventSize = 0
+	  eventFieldSizes = { data: 0, event: 0, id: 0, retry: 0 }
+	  dataLineCount = 0
+	  maxEventSize
+	  maxDataLines
+	  maxBufferedChunks
 
 	  event = {
 	    data: undefined,
@@ -27213,6 +27474,7 @@ function requireEventsourceStream () {
 
 	  /**
 	   * @param {object} options
+	   * @param {number} [options.maxEventSize]
 	   * @param {eventSourceSettings} options.eventSourceSettings
 	   * @param {Function} [options.push]
 	   */
@@ -27224,6 +27486,12 @@ function requireEventsourceStream () {
 	    super(options);
 
 	    this.state = options.eventSourceSettings || {};
+	    this.maxEventSize = options.maxEventSize ?? defaultMaxEventSize;
+	    const parserItemLimit = this.maxEventSize > 0
+	      ? Math.min(maxParserItems, Math.max(minParserItems, Math.floor(this.maxEventSize / bytesPerParserItem)))
+	      : 0;
+	    this.maxDataLines = parserItemLimit;
+	    this.maxBufferedChunks = parserItemLimit;
 	    if (options.push) {
 	      this.push = options.push;
 	    }
@@ -27241,92 +27509,28 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    // Cache the chunk in the buffer, as the data might not be complete while
-	    // processing it
-	    // TODO: Investigate if there is a more performant way to handle
-	    // incoming chunks
-	    // see: https://github.com/nodejs/undici/issues/2630
-	    if (this.buffer) {
-	      this.buffer = Buffer.concat([this.buffer, chunk]);
-	    } else {
-	      this.buffer = chunk;
+	    // A leading line ending can immediately release the currently buffered
+	    // line, even when it uses the final allowed chunk slot.
+	    if (this.maxEventSize > 0 &&
+	        this.chunks.length >= this.maxBufferedChunks &&
+	        chunk[0] !== LF && chunk[0] !== CR) {
+	      callback(createMaxEventSizeExceededError());
+	      return
 	    }
+	    this.chunks.push(chunk);
 
 	    // Strip leading byte-order-mark if we opened the stream and started
 	    // the processing of the incoming data
 	    if (this.checkBOM) {
-	      switch (this.buffer.length) {
-	        case 1:
-	          // Check if the first byte is the same as the first byte of the BOM
-	          if (this.buffer[0] === BOM[0]) {
-	            // If it is, we need to wait for more data
-	            callback();
-	            return
-	          }
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-
-	          // The buffer only contains one byte so we need to wait for more data
-	          callback();
-	          return
-	        case 2:
-	          // Check if the first two bytes are the same as the first two bytes
-	          // of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1]
-	          ) {
-	            // If it is, we need to wait for more data, because the third byte
-	            // is needed to determine if it is the BOM or not
-	            callback();
-	            return
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-	          break
-	        case 3:
-	          // Check if the first three bytes are the same as the first three
-	          // bytes of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // If it is, we can drop the buffered data, as it is only the BOM
-	            this.buffer = Buffer.alloc(0);
-	            // Set the checkBOM flag to false as we don't need to check for the
-	            // BOM anymore
-	            this.checkBOM = false;
-
-	            // Await more data
-	            callback();
-	            return
-	          }
-	          // If it is not the BOM, we can start processing the data
-	          this.checkBOM = false;
-	          break
-	        default:
-	          // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-	          // present
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // Remove the BOM from the buffer
-	            this.buffer = this.buffer.subarray(3);
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          this.checkBOM = false;
-	          break
+	      if (this.handleBOM()) {
+	        callback();
+	        return
 	      }
 	    }
 
-	    while (this.pos < this.buffer.length) {
+	    while (this.hasCurrentByte()) {
+	      const byte = this.currentByte();
+
 	      // If the previous line ended with an end-of-line, we need to check
 	      // if the next character is also an end-of-line.
 	      if (this.eventEndCheck) {
@@ -27339,10 +27543,9 @@ function requireEventsourceStream () {
 	        if (this.crlfCheck) {
 	          // If the current character is a line feed, we can remove it
 	          // from the buffer and reset the crlfCheck flag
-	          if (this.buffer[this.pos] === LF) {
-	            this.buffer = this.buffer.subarray(this.pos + 1);
-	            this.pos = 0;
+	          if (byte === LF) {
 	            this.crlfCheck = false;
+	            this.consumeCurrentByte();
 
 	            // It is possible that the line feed is not the end of the
 	            // event. We need to check if the next character is an
@@ -27358,19 +27561,17 @@ function requireEventsourceStream () {
 	          this.crlfCheck = false;
 	        }
 
-	        if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	        if (byte === LF || byte === CR) {
 	          // If the current character is a carriage return, we need to
 	          // set the crlfCheck flag to true, as we need to check if the
 	          // next character is a line feed so we can remove it from the
 	          // buffer
-	          if (this.buffer[this.pos] === CR) {
+	          if (byte === CR) {
 	            this.crlfCheck = true;
 	          }
 
-	          this.buffer = this.buffer.subarray(this.pos + 1);
-	          this.pos = 0;
-	          if (
-	            this.event.data !== undefined || this.event.event || this.event.id || this.event.retry) {
+	          this.consumeCurrentByte();
+	          if (this.hasPendingEvent()) {
 	            this.processEvent(this.event);
 	          }
 	          this.clearEvent();
@@ -27384,22 +27585,23 @@ function requireEventsourceStream () {
 
 	      // If the current character is an end-of-line, we can process the
 	      // line
-	      if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	      if (byte === LF || byte === CR) {
 	        // If the current character is a carriage return, we need to
 	        // set the crlfCheck flag to true, as we need to check if the
 	        // next character is a line feed
-	        if (this.buffer[this.pos] === CR) {
+	        if (byte === CR) {
 	          this.crlfCheck = true;
 	        }
 
 	        // In any case, we can process the line as we reached an
 	        // end-of-line character
-	        this.parseLine(this.buffer.subarray(0, this.pos), this.event);
-
-	        // Remove the processed line from the buffer
-	        this.buffer = this.buffer.subarray(this.pos + 1);
-	        // Reset the position as we removed the processed line from the buffer
-	        this.pos = 0;
+	        try {
+	          this.parseLine(this.readLine(), this.event);
+	        } catch (error) {
+	          callback(error);
+	          return
+	        }
+	        this.consumeCurrentByte();
 	        // A line was processed and this could be the end of the event. We need
 	        // to check if the next line is empty to determine if the event is
 	        // finished.
@@ -27407,15 +27609,28 @@ function requireEventsourceStream () {
 	        continue
 	      }
 
-	      this.pos++;
+	      // readLine() is only called after CR or LF. Reject an unfinished line
+	      // before it can retain an unbounded number of decoded chunks. The seven
+	      // extra bytes allow the longest field prefix ("event: " or "retry: ").
+	      if (this.maxEventSize > 0 && ++this.lineLength > this.maxEventSize + 7) {
+	        callback(createMaxEventSizeExceededError());
+	        return
+	      }
+	      this.advanceCursor();
 	    }
 
 	    callback();
 	  }
 
+	  _destroy (error, callback) {
+	    this.chunks.length = 0;
+	    this.clearEvent();
+	    super._destroy(error, callback);
+	  }
+
 	  /**
 	   * @param {Buffer} line
-	   * @param {EventStreamEvent} event
+	   * @param {EventSourceStreamEvent} event
 	   */
 	  parseLine (line, event) {
 	    // If the line is empty (a blank line)
@@ -27432,65 +27647,72 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    let field = '';
-	    let value = '';
+	    let fieldLength = line.length;
+	    let valueStart = line.length;
 
 	    // If the line contains a U+003A COLON character (:)
 	    if (colonPosition !== -1) {
-	      // Collect the characters on the line before the first U+003A COLON
-	      // character (:), and let field be that string.
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // field
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      field = line.subarray(0, colonPosition).toString('utf8');
+	      fieldLength = colonPosition;
 
 	      // Collect the characters on the line after the first U+003A COLON
 	      // character (:), and let value be that string.
 	      // If value starts with a U+0020 SPACE character, remove it from value.
-	      let valueStart = colonPosition + 1;
+	      valueStart = colonPosition + 1;
 	      if (line[valueStart] === SPACE) {
 	        ++valueStart;
 	      }
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // value
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      value = line.subarray(valueStart).toString('utf8');
-
-	      // Otherwise, the string is not empty but does not contain a U+003A COLON
-	      // character (:)
-	    } else {
-	      // Process the field using the steps described below, using the whole
-	      // line as the field name, and the empty string as the field value.
-	      field = line.toString('utf8');
-	      value = '';
 	    }
 
-	    // Modify the event with the field name and value. The value is also
-	    // decoded as UTF-8
-	    switch (field) {
-	      case 'data':
-	        if (event[field] === undefined) {
-	          event[field] = value;
-	        } else {
-	          event[field] += `\n${value}`;
-	        }
-	        break
-	      case 'retry':
-	        if (isASCIINumber(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'id':
-	        if (isValidLastEventId(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'event':
-	        if (value.length > 0) {
-	          event[field] = value;
-	        }
-	        break
+	    if (isFieldName(line, fieldLength, DATA)) {
+	      if (this.maxEventSize > 0 && this.dataLineCount >= this.maxDataLines) {
+	        throw createMaxEventSizeExceededError()
+	      }
+	      const valueBytes = line.length - valueStart;
+	      const dataSize = this.eventFieldSizes.data + (event.data === undefined ? 0 : 1) + valueBytes;
+	      this.setEventFieldSize('data', dataSize);
+
+	      const value = line.toString('utf8', valueStart);
+
+	      if (event.data === undefined) {
+	        event.data = value;
+	      } else {
+	        event.data += `\n${value}`;
+	      }
+	      this.dataLineCount++;
+	      return
 	    }
+
+	    if (isFieldName(line, fieldLength, RETRY)) {
+	      if (isASCIINumberBytes(line, valueStart)) {
+	        this.setEventFieldSize('retry', line.length - valueStart);
+	        event.retry = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, ID)) {
+	      if (isValidLastEventIdBytes(line, valueStart)) {
+	        this.setEventFieldSize('id', line.length - valueStart);
+	        event.id = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, EVENT)) {
+	      if (valueStart < line.length) {
+	        this.setEventFieldSize('event', line.length - valueStart);
+	        event.event = line.toString('utf8', valueStart);
+	      }
+	    }
+	  }
+
+	  setEventFieldSize (field, size) {
+	    const eventSize = this.eventSize - this.eventFieldSizes[field] + size;
+	    if (this.maxEventSize > 0 && eventSize > this.maxEventSize) {
+	      throw createMaxEventSizeExceededError()
+	    }
+	    this.eventSize = eventSize;
+	    this.eventFieldSizes[field] = size;
 	  }
 
 	  /**
@@ -27519,12 +27741,159 @@ function requireEventsourceStream () {
 	  }
 
 	  clearEvent () {
-	    this.event = {
-	      data: undefined,
-	      event: undefined,
-	      id: undefined,
-	      retry: undefined
-	    };
+	    this.event.data = undefined;
+	    this.event.event = undefined;
+	    this.event.id = undefined;
+	    this.event.retry = undefined;
+	    this.eventSize = 0;
+	    this.dataLineCount = 0;
+	    this.eventFieldSizes.data = 0;
+	    this.eventFieldSizes.event = 0;
+	    this.eventFieldSizes.id = 0;
+	    this.eventFieldSizes.retry = 0;
+	  }
+
+	  hasPendingEvent () {
+	    return this.event.data !== undefined ||
+	      this.event.event !== undefined ||
+	      this.event.id !== undefined ||
+	      this.event.retry !== undefined
+	  }
+
+	  hasCurrentByte () {
+	    return this.chunkIndex < this.chunks.length &&
+	      this.pos < this.chunks[this.chunkIndex].length
+	  }
+
+	  currentByte () {
+	    return this.chunks[this.chunkIndex][this.pos]
+	  }
+
+	  consumeCurrentByte () {
+	    this.advanceCursor();
+	    this.syncLineStartToCursor();
+	  }
+
+	  advanceCursor () {
+	    this.pos++;
+
+	    while (this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length) {
+	      this.chunkIndex++;
+	      this.pos = 0;
+	    }
+	  }
+
+	  syncLineStartToCursor () {
+	    this.lineChunkIndex = this.chunkIndex;
+	    this.linePos = this.pos;
+	    this.lineLength = 0;
+	    this.dropConsumedChunks();
+	  }
+
+	  dropConsumedChunks () {
+	    if (this.lineChunkIndex > 0) {
+	      const consumed = this.lineChunkIndex;
+	      this.chunks.splice(0, consumed);
+	      this.lineChunkIndex = 0;
+	      this.chunkIndex -= consumed;
+	    }
+
+	    if (this.chunkIndex === this.chunks.length) {
+	      this.chunks.length = 0;
+	      this.chunkIndex = 0;
+	      this.pos = 0;
+	      this.lineChunkIndex = 0;
+	      this.linePos = 0;
+	    }
+	  }
+
+	  readLine () {
+	    if (this.lineChunkIndex === this.chunkIndex) {
+	      return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+	    }
+
+	    const chunks = [];
+	    let length = 0;
+
+	    for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+	      const chunk = this.chunks[i];
+	      const start = i === this.lineChunkIndex ? this.linePos : 0;
+	      const end = i === this.chunkIndex ? this.pos : chunk.length;
+	      const slice = chunk.subarray(start, end);
+	      length += slice.length;
+	      chunks.push(slice);
+	    }
+
+	    return Buffer.concat(chunks, length)
+	  }
+
+	  peekBufferedByte (offset) {
+	    let chunkIndex = this.lineChunkIndex;
+	    let pos = this.linePos;
+
+	    while (chunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[chunkIndex];
+	      const remaining = chunk.length - pos;
+
+	      if (offset < remaining) {
+	        return chunk[pos + offset]
+	      }
+
+	      offset -= remaining;
+	      chunkIndex++;
+	      pos = 0;
+	    }
+	  }
+
+	  discardLeadingBytes (count) {
+	    while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[this.lineChunkIndex];
+	      const remaining = chunk.length - this.linePos;
+
+	      if (count < remaining) {
+	        this.linePos += count;
+	        count = 0;
+	      } else {
+	        count -= remaining;
+	        this.lineChunkIndex++;
+	        this.linePos = 0;
+	      }
+	    }
+
+	    this.chunkIndex = this.lineChunkIndex;
+	    this.pos = this.linePos;
+	    this.dropConsumedChunks();
+	  }
+
+	  handleBOM () {
+	    const first = this.peekBufferedByte(0);
+	    const second = this.peekBufferedByte(1);
+	    const third = this.peekBufferedByte(2);
+
+	    if (second === undefined) {
+	      if (first === BOM[0]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return true
+	    }
+
+	    if (third === undefined) {
+	      if (first === BOM[0] && second === BOM[1]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return false
+	    }
+
+	    if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+	      this.discardLeadingBytes(3);
+	    }
+
+	    this.checkBOM = false;
+	    return !this.hasCurrentByte()
 	  }
 	}
 
@@ -27552,6 +27921,7 @@ function requireEventsource () {
 	const { delay } = requireUtil();
 	const { kEnumerableProperty } = requireUtil$7();
 	const { environmentSettingsObject } = requireUtil$6();
+	const { getGlobalDispatcher } = requireGlobal();
 
 	let experimentalWarned = false;
 
@@ -27833,6 +28203,7 @@ function requireEventsource () {
 
 	      const eventSourceStream = new EventSourceStream({
 	        eventSourceSettings: this.#state,
+	        maxEventSize: this.#dispatcher.eventSourceOptions?.maxEventSize,
 	        push: (event) => {
 	          this.dispatchEvent(createFastMessageEvent(
 	            event.type,
@@ -28011,7 +28382,8 @@ function requireEventsource () {
 	  },
 	  {
 	    key: 'dispatcher', // undici only
-	    converter: webidl.converters.any
+	    converter: webidl.converters.any,
+	    defaultValue: () => getGlobalDispatcher()
 	  }
 	]);
 
@@ -28388,6 +28760,27 @@ function getInput(name, options) {
     return val.trim();
 }
 /**
+ * Gets the input value of the boolean type in the YAML 1.2 "core schema" specification.
+ * Support boolean input list: `true | True | TRUE | false | False | FALSE` .
+ * The return value is also in boolean type.
+ * ref: https://yaml.org/spec/1.2/spec.html#id2804923
+ *
+ * @param     name     name of the input to get
+ * @param     options  optional. See InputOptions.
+ * @returns   boolean
+ */
+function getBooleanInput(name, options) {
+    const trueValue = ['true', 'True', 'TRUE'];
+    const falseValue = ['false', 'False', 'FALSE'];
+    const val = getInput(name);
+    if (trueValue.includes(val))
+        return true;
+    if (falseValue.includes(val))
+        return false;
+    throw new TypeError(`Input does not meet YAML 1.2 "Core Schema" specification: ${name}\n` +
+        `Support boolean input list: \`true | True | TRUE | false | False | FALSE\``);
+}
+/**
  * Sets the value of an output.
  *
  * @param     name     name of the output to set
@@ -28418,7 +28811,7 @@ function setFailed(message) {
  * Writes debug message to user log
  * @param message debug message
  */
-function debug(message) {
+function debug$3(message) {
     issueCommand('debug', {}, message);
 }
 /**
@@ -28484,7 +28877,7 @@ function group(name, fn) {
  * @param min - The smallest integer value allowed.
  * @param max - The largest integer value allowed.
  */
-function getRandomIntegerInclusive$1(min, max) {
+function getRandomIntegerInclusive(min, max) {
     // Make sure inputs are integers.
     min = Math.ceil(min);
     max = Math.floor(max);
@@ -28503,14 +28896,14 @@ function getRandomIntegerInclusive$1(min, max) {
  * @param config - The exponential retry configuration.
  * @returns An object containing the calculated retry delay.
  */
-function calculateRetryDelay$1(retryAttempt, config) {
+function calculateRetryDelay(retryAttempt, config) {
     // Exponentially increase the delay each time
     const exponentialDelay = config.retryDelayInMs * Math.pow(2, retryAttempt);
     // Don't let the delay exceed the maximum
     const clampedDelay = Math.min(config.maxRetryDelayInMs, exponentialDelay);
     // Allow the final value to have some "jitter" (within 50% of the delay size) so
     // that retries across multiple clients don't occur simultaneously.
-    const retryAfterInMs = clampedDelay / 2 + getRandomIntegerInclusive$1(0, clampedDelay / 2);
+    const retryAfterInMs = clampedDelay / 2 + getRandomIntegerInclusive(0, clampedDelay / 2);
     return { retryAfterInMs };
 }
 
@@ -28520,7 +28913,7 @@ function calculateRetryDelay$1(retryAttempt, config) {
  * Helper to determine when an input is a generic JS object.
  * @returns true when input is an object type that is not null, Array, RegExp, or Date.
  */
-function isObject$1(input) {
+function isObject(input) {
     return (typeof input === "object" &&
         input !== null &&
         !Array.isArray(input) &&
@@ -28534,8 +28927,8 @@ function isObject$1(input) {
  * Typeguard for an error object shape (has name and message)
  * @param e - Something caught by a catch clause.
  */
-function isError$3(e) {
-    if (isObject$1(e)) {
+function isError$1(e) {
+    if (isObject(e)) {
         const hasName = typeof e.name === "string";
         const hasMessage = typeof e.message === "string";
         return hasName && hasMessage;
@@ -28550,32 +28943,32 @@ function isError$3(e) {
  *
  * @returns RFC4122 v4 UUID.
  */
-function randomUUID$1() {
-    return crypto.randomUUID();
+function randomUUID() {
+    return globalThis.crypto.randomUUID();
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
- * A constant that indicates whether the environment the code is running is a Web Browser.
+ * Returns the value of the specified environment variable.
+ *
+ * @internal
  */
-// eslint-disable-next-line @azure/azure-sdk/ts-no-window
+function getEnvironmentVariable(name) {
+    return process$1.env[name];
+}
 /**
  * A constant that indicates whether the environment the code is running is Deno.
  */
-typeof Deno !== "undefined" &&
-    typeof Deno.version !== "undefined" &&
-    typeof Deno.version.deno !== "undefined";
+typeof process$1.versions.deno === "string" && process$1.versions.deno.length > 0;
 /**
  * A constant that indicates whether the environment the code is running is Bun.sh.
  */
-typeof Bun !== "undefined" && typeof Bun.version !== "undefined";
+typeof process$1.versions.bun === "string" && process$1.versions.bun.length > 0;
 /**
  * A constant that indicates whether the environment the code is running is a Node.js compatible environment.
  */
-const isNodeLike$3 = typeof globalThis.process !== "undefined" &&
-    Boolean(globalThis.process.version) &&
-    Boolean(globalThis.process.versions?.node);
+const isNodeLike$1 = true;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -28585,6 +28978,9 @@ const isNodeLike$3 = typeof globalThis.process !== "undefined" &&
  * @param format - the format we use to encode the byte
  * @returns a string of the encoded string
  */
+function uint8ArrayToString$1(bytes, format) {
+    return Buffer.from(bytes).toString(format);
+}
 /**
  * The helper that transforms string to specific character encoded bytes array.
  * @param value - the string to be converted
@@ -28597,9 +28993,9 @@ function stringToUint8Array$1(value, format) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const RedactedString$1 = "REDACTED";
+const RedactedString = "REDACTED";
 // Make sure this list is up-to-date with the one under core/logger/Readme#Keyconcepts
-const defaultAllowedHeaderNames$1 = [
+const defaultAllowedHeaderNames = [
     "x-ms-client-request-id",
     "x-ms-return-client-request-id",
     "x-ms-useragent",
@@ -28609,6 +29005,7 @@ const defaultAllowedHeaderNames$1 = [
     "ms-cv",
     "return-client-request-id",
     "traceparent",
+    "azure-deprecating",
     "Access-Control-Allow-Credentials",
     "Access-Control-Allow-Headers",
     "Access-Control-Allow-Methods",
@@ -28640,16 +29037,16 @@ const defaultAllowedHeaderNames$1 = [
     "User-Agent",
     "WWW-Authenticate",
 ];
-const defaultAllowedQueryParameters$1 = ["api-version"];
+const defaultAllowedQueryParameters = ["api-version"];
 /**
  * A utility class to sanitize objects for logging.
  */
-let Sanitizer$1 = class Sanitizer {
+class Sanitizer {
     allowedHeaderNames;
     allowedQueryParameters;
     constructor({ additionalAllowedHeaderNames: allowedHeaderNames = [], additionalAllowedQueryParameters: allowedQueryParameters = [], } = {}) {
-        allowedHeaderNames = defaultAllowedHeaderNames$1.concat(allowedHeaderNames);
-        allowedQueryParameters = defaultAllowedQueryParameters$1.concat(allowedQueryParameters);
+        allowedHeaderNames = defaultAllowedHeaderNames.concat(allowedHeaderNames);
+        allowedQueryParameters = defaultAllowedQueryParameters.concat(allowedQueryParameters);
         this.allowedHeaderNames = new Set(allowedHeaderNames.map((n) => n.toLowerCase()));
         this.allowedQueryParameters = new Set(allowedQueryParameters.map((p) => p.toLowerCase()));
     }
@@ -28669,13 +29066,13 @@ let Sanitizer$1 = class Sanitizer {
                     message: value.message,
                 };
             }
-            if (key === "headers") {
+            if (key === "headers" && isObject(value)) {
                 return this.sanitizeHeaders(value);
             }
-            else if (key === "url") {
+            else if (key === "url" && typeof value === "string") {
                 return this.sanitizeUrl(value);
             }
-            else if (key === "query") {
+            else if (key === "query" && isObject(value)) {
                 return this.sanitizeQuery(value);
             }
             else if (key === "body") {
@@ -28691,7 +29088,7 @@ let Sanitizer$1 = class Sanitizer {
                 // field with the autorest spec. No need to log it.
                 return undefined;
             }
-            else if (Array.isArray(value) || isObject$1(value)) {
+            else if (Array.isArray(value) || isObject(value)) {
                 if (seen.has(value)) {
                     return "[Circular]";
                 }
@@ -28715,7 +29112,7 @@ let Sanitizer$1 = class Sanitizer {
         }
         for (const [key] of url.searchParams) {
             if (!this.allowedQueryParameters.has(key.toLowerCase())) {
-                url.searchParams.set(key, RedactedString$1);
+                url.searchParams.set(key, RedactedString);
             }
         }
         return url.toString();
@@ -28727,7 +29124,7 @@ let Sanitizer$1 = class Sanitizer {
                 sanitized[key] = obj[key];
             }
             else {
-                sanitized[key] = RedactedString$1;
+                sanitized[key] = RedactedString;
             }
         }
         return sanitized;
@@ -28742,260 +29139,65 @@ let Sanitizer$1 = class Sanitizer {
                 sanitized[k] = value[k];
             }
             else {
-                sanitized[k] = RedactedString$1;
+                sanitized[k] = RedactedString;
             }
         }
         return sanitized;
     }
-};
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT license.
-/**
- * This error is thrown when an asynchronous operation has been aborted.
- * Check for this error by testing the `name` that the name property of the
- * error matches `"AbortError"`.
- *
- * @example
- * ```ts
- * const controller = new AbortController();
- * controller.abort();
- * try {
- *   doAsyncWork(controller.signal)
- * } catch (e) {
- *   if (e.name === 'AbortError') {
- *     // handle abort error here.
- *   }
- * }
- * ```
- */
-let AbortError$3 = class AbortError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = "AbortError";
-    }
-};
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates an abortable promise.
- * @param buildPromise - A function that takes the resolve and reject functions as parameters.
- * @param options - The options for the abortable promise.
- * @returns A promise that can be aborted.
- */
-function createAbortablePromise$1(buildPromise, options) {
-    const { cleanupBeforeAbort, abortSignal, abortErrorMsg } = options ?? {};
-    return new Promise((resolve, reject) => {
-        function rejectOnAbort() {
-            reject(new AbortError$3(abortErrorMsg ?? "The operation was aborted."));
-        }
-        function removeListeners() {
-            abortSignal?.removeEventListener("abort", onAbort);
-        }
-        function onAbort() {
-            cleanupBeforeAbort?.();
-            removeListeners();
-            rejectOnAbort();
-        }
-        if (abortSignal?.aborted) {
-            return rejectOnAbort();
-        }
-        try {
-            buildPromise((x) => {
-                removeListeners();
-                resolve(x);
-            }, (x) => {
-                removeListeners();
-                reject(x);
-            });
-        }
-        catch (err) {
-            reject(err);
-        }
-        abortSignal?.addEventListener("abort", onAbort);
-    });
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const StandardAbortMessage$3 = "The delay was aborted.";
-/**
- * A wrapper for setTimeout that resolves a promise after timeInMs milliseconds.
- * @param timeInMs - The number of milliseconds to be delayed.
- * @param options - The options for delay - currently abort options
- * @returns Promise that is resolved after timeInMs
- */
-function delay$5(timeInMs, options) {
-    let token;
-    const { abortSignal, abortErrorMsg } = {};
-    return createAbortablePromise$1((resolve) => {
-        token = setTimeout(resolve, timeInMs);
-    }, {
-        cleanupBeforeAbort: () => clearTimeout(token),
-        abortSignal,
-        abortErrorMsg: abortErrorMsg ?? StandardAbortMessage$3,
-    });
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Given what is thought to be an error object, return the message if possible.
- * If the message is missing, returns a stringified version of the input.
- * @param e - Something thrown from a try block
- * @returns The error message or a string of the input
- */
-function getErrorMessage$1(e) {
-    if (isError$3(e)) {
-        return e.message;
-    }
-    else {
-        let stringified;
-        try {
-            if (typeof e === "object" && e) {
-                stringified = JSON.stringify(e);
-            }
-            else {
-                stringified = String(e);
-            }
-        }
-        catch (err) {
-            stringified = "[unable to stringify input]";
-        }
-        return `Unknown error ${stringified}`;
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Typeguard for an error object shape (has name and message)
- *
- * @param e - Something caught by a catch clause.
- */
-function isError$2(e) {
-    return isError$3(e);
-}
-/**
- * A constant that indicates whether the environment the code is running is a Node.js compatible environment.
- */
-const isNodeLike$2 = isNodeLike$3;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * @internal
- * @param accessToken - Access token
- * @returns Whether a token is bearer type or not
- */
-/**
- * Tests an object to determine whether it implements TokenCredential.
- *
- * @param credential - The assumed TokenCredential to be tested.
- */
-function isTokenCredential(credential) {
-    // Check for an object with a 'getToken' function and possibly with
-    // a 'signRequest' function.  We do this check to make sure that
-    // a ServiceClientCredentials implementor (like TokenClientCredentials
-    // in ms-rest-nodeauth) doesn't get mistaken for a TokenCredential if
-    // it doesn't actually implement TokenCredential also.
-    const castCredential = credential;
-    return (castCredential &&
-        typeof castCredential.getToken === "function" &&
-        (castCredential.signRequest === undefined || castCredential.getToken.length > 0));
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * This error is thrown when an asynchronous operation has been aborted.
- * Check for this error by testing the `name` that the name property of the
- * error matches `"AbortError"`.
- *
- * @example
- * ```ts snippet:ReadmeSampleAbortError
- * import { AbortError } from "@typespec/ts-http-runtime";
- *
- * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
- *   if (options.abortSignal.aborted) {
- *     throw new AbortError();
- *   }
- *
- *   // do async work
- * }
- *
- * const controller = new AbortController();
- * controller.abort();
- *
- * try {
- *   doAsyncWork({ abortSignal: controller.signal });
- * } catch (e) {
- *   if (e instanceof Error && e.name === "AbortError") {
- *     // handle abort error here.
- *   }
- * }
- * ```
- */
-let AbortError$2 = class AbortError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = "AbortError";
-    }
-};
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function log$1(message, ...args) {
+function log(message, ...args) {
     process$1.stderr.write(`${require$$0$4.format(message, ...args)}${EOL}`);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const debugEnvVariable$1 = (typeof process !== "undefined" && process.env && process.env.DEBUG) || undefined;
-let enabledString$1;
-let enabledNamespaces$1 = [];
-let skippedNamespaces$1 = [];
-const debuggers$1 = [];
-if (debugEnvVariable$1) {
-    enable$1(debugEnvVariable$1);
+const debugEnvVariable = getEnvironmentVariable("DEBUG");
+let enabledString;
+let enabledNamespaces = [];
+let skippedNamespaces = [];
+const debuggers = [];
+if (debugEnvVariable) {
+    enable(debugEnvVariable);
 }
-const debugObj$1 = Object.assign((namespace) => {
-    return createDebugger$1(namespace);
+const debugObj = Object.assign((namespace) => {
+    return createDebugger(namespace);
 }, {
-    enable: enable$1,
-    enabled: enabled$1,
-    disable: disable$1,
-    log: log$1,
+    enable,
+    enabled,
+    disable,
+    log,
 });
-function enable$1(namespaces) {
-    enabledString$1 = namespaces;
-    enabledNamespaces$1 = [];
-    skippedNamespaces$1 = [];
+function enable(namespaces) {
+    enabledString = namespaces;
+    enabledNamespaces = [];
+    skippedNamespaces = [];
     const namespaceList = namespaces.split(",").map((ns) => ns.trim());
     for (const ns of namespaceList) {
         if (ns.startsWith("-")) {
-            skippedNamespaces$1.push(ns.substring(1));
+            skippedNamespaces.push(ns.substring(1));
         }
         else {
-            enabledNamespaces$1.push(ns);
+            enabledNamespaces.push(ns);
         }
     }
-    for (const instance of debuggers$1) {
-        instance.enabled = enabled$1(instance.namespace);
+    for (const instance of debuggers) {
+        instance.enabled = enabled(instance.namespace);
     }
 }
-function enabled$1(namespace) {
+function enabled(namespace) {
     if (namespace.endsWith("*")) {
         return true;
     }
-    for (const skipped of skippedNamespaces$1) {
-        if (namespaceMatches$1(namespace, skipped)) {
+    for (const skipped of skippedNamespaces) {
+        if (namespaceMatches(namespace, skipped)) {
             return false;
         }
     }
-    for (const enabledNamespace of enabledNamespaces$1) {
-        if (namespaceMatches$1(namespace, enabledNamespace)) {
+    for (const enabledNamespace of enabledNamespaces) {
+        if (namespaceMatches(namespace, enabledNamespace)) {
             return true;
         }
     }
@@ -29006,7 +29208,7 @@ function enabled$1(namespace) {
  * Patterns only have a single wildcard character which is *.
  * The behavior of * is that it matches zero or more other characters.
  */
-function namespaceMatches$1(namespace, patternToMatch) {
+function namespaceMatches(namespace, patternToMatch) {
     // simple case, no pattern matching required
     if (patternToMatch.indexOf("*") === -1) {
         return namespace === patternToMatch;
@@ -29094,18 +29296,18 @@ function namespaceMatches$1(namespace, patternToMatch) {
     const trailingWildCard = patternIndex === pattern.length - 1 && pattern[patternIndex] === "*";
     return namespaceDone && (patternDone || trailingWildCard);
 }
-function disable$1() {
-    const result = enabledString$1 || "";
-    enable$1("");
+function disable() {
+    const result = enabledString || "";
+    enable("");
     return result;
 }
-function createDebugger$1(namespace) {
+function createDebugger(namespace) {
     const newDebugger = Object.assign(debug, {
-        enabled: enabled$1(namespace),
-        destroy: destroy$1,
-        log: debugObj$1.log,
+        enabled: enabled(namespace),
+        destroy,
+        log: debugObj.log,
         namespace,
-        extend: extend$1,
+        extend,
     });
     function debug(...args) {
         if (!newDebugger.enabled) {
@@ -29116,57 +29318,56 @@ function createDebugger$1(namespace) {
         }
         newDebugger.log(...args);
     }
-    debuggers$1.push(newDebugger);
+    debuggers.push(newDebugger);
     return newDebugger;
 }
-function destroy$1() {
-    const index = debuggers$1.indexOf(this);
+function destroy() {
+    const index = debuggers.indexOf(this);
     if (index >= 0) {
-        debuggers$1.splice(index, 1);
+        debuggers.splice(index, 1);
         return true;
     }
     return false;
 }
-function extend$1(namespace) {
-    const newDebugger = createDebugger$1(`${this.namespace}:${namespace}`);
+function extend(namespace) {
+    const newDebugger = createDebugger(`${this.namespace}:${namespace}`);
     newDebugger.log = this.log;
     return newDebugger;
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const TYPESPEC_RUNTIME_LOG_LEVELS$1 = ["verbose", "info", "warning", "error"];
-const levelMap$1 = {
+const TYPESPEC_RUNTIME_LOG_LEVELS = ["verbose", "info", "warning", "error"];
+const levelMap = {
     verbose: 400,
     info: 300,
     warning: 200,
     error: 100,
 };
-function patchLogMethod$1(parent, child) {
+function patchLogMethod(parent, child) {
     child.log = (...args) => {
         parent.log(...args);
     };
 }
-function isTypeSpecRuntimeLogLevel$1(level) {
-    return TYPESPEC_RUNTIME_LOG_LEVELS$1.includes(level);
+function isTypeSpecRuntimeLogLevel(level) {
+    return TYPESPEC_RUNTIME_LOG_LEVELS.includes(level);
 }
 /**
  * Creates a logger context base on the provided options.
  * @param options - The options for creating a logger context.
  * @returns The logger context.
  */
-function createLoggerContext$1(options) {
+function createLoggerContext(options) {
     const registeredLoggers = new Set();
-    const logLevelFromEnv = (typeof process !== "undefined" && process.env && process.env[options.logLevelEnvVarName]) ||
-        undefined;
+    const logLevelFromEnv = getEnvironmentVariable(options.logLevelEnvVarName);
     let logLevel;
-    const clientLogger = debugObj$1(options.namespace);
+    const clientLogger = debugObj(options.namespace);
     clientLogger.log = (...args) => {
-        debugObj$1.log(...args);
+        debugObj.log(...args);
     };
     function contextSetLogLevel(level) {
-        if (level && !isTypeSpecRuntimeLogLevel$1(level)) {
-            throw new Error(`Unknown log level '${level}'. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS$1.join(",")}`);
+        if (level && !isTypeSpecRuntimeLogLevel(level)) {
+            throw new Error(`Unknown log level '${level}'. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS.join(",")}`);
         }
         logLevel = level;
         const enabledNamespaces = [];
@@ -29175,28 +29376,28 @@ function createLoggerContext$1(options) {
                 enabledNamespaces.push(logger.namespace);
             }
         }
-        debugObj$1.enable(enabledNamespaces.join(","));
+        debugObj.enable(enabledNamespaces.join(","));
     }
     if (logLevelFromEnv) {
         // avoid calling setLogLevel because we don't want a mis-set environment variable to crash
-        if (isTypeSpecRuntimeLogLevel$1(logLevelFromEnv)) {
+        if (isTypeSpecRuntimeLogLevel(logLevelFromEnv)) {
             contextSetLogLevel(logLevelFromEnv);
         }
         else {
-            console.error(`${options.logLevelEnvVarName} set to unknown log level '${logLevelFromEnv}'; logging is not enabled. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS$1.join(", ")}.`);
+            console.error(`${options.logLevelEnvVarName} set to unknown log level '${logLevelFromEnv}'; logging is not enabled. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS.join(", ")}.`);
         }
     }
     function shouldEnable(logger) {
-        return Boolean(logLevel && levelMap$1[logger.level] <= levelMap$1[logLevel]);
+        return Boolean(logLevel && levelMap[logger.level] <= levelMap[logLevel]);
     }
     function createLogger(parent, level) {
         const logger = Object.assign(parent.extend(level), {
             level,
         });
-        patchLogMethod$1(parent, logger);
+        patchLogMethod(parent, logger);
         if (shouldEnable(logger)) {
-            const enabledNamespaces = debugObj$1.disable();
-            debugObj$1.enable(enabledNamespaces + "," + logger.namespace);
+            const enabledNamespaces = debugObj.disable();
+            debugObj.enable(enabledNamespaces + "," + logger.namespace);
         }
         registeredLoggers.add(logger);
         return logger;
@@ -29206,7 +29407,7 @@ function createLoggerContext$1(options) {
     }
     function contextCreateClientLogger(namespace) {
         const clientRootLogger = clientLogger.extend(namespace);
-        patchLogMethod$1(clientLogger, clientRootLogger);
+        patchLogMethod(clientLogger, clientRootLogger);
         return {
             error: createLogger(clientRootLogger, "error"),
             warning: createLogger(clientRootLogger, "warning"),
@@ -29221,7 +29422,7 @@ function createLoggerContext$1(options) {
         logger: clientLogger,
     };
 }
-const context$3 = createLoggerContext$1({
+const context$1 = createLoggerContext({
     logLevelEnvVarName: "TYPESPEC_RUNTIME_LOG_LEVEL",
     namespace: "typeSpecRuntime",
 });
@@ -29230,21 +29431,406 @@ const context$3 = createLoggerContext$1({
  * @param namespace - The name of the SDK package.
  * @hidden
  */
-function createClientLogger$3(namespace) {
-    return context$3.createClientLogger(namespace);
+function createClientLogger$1(namespace) {
+    return context$1.createClientLogger(namespace);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-function normalizeName$1(name) {
+const logger$6 = createClientLogger$1("ts-http-runtime");
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const responseBodySources = new WeakMap();
+const responseBodyDisposers = new WeakMap();
+const requestCompletions = new WeakMap();
+const responseBodyCompletions = new WeakMap();
+function setRequestCompletion(response, completion) {
+    requestCompletions.set(response, completion);
+    completion
+        .then(() => requestCompletions.get(response) === completion && requestCompletions.delete(response))
+        .catch((error) => {
+        logger$6.warning("Error tracking request completion", error);
+    });
+}
+/**
+ * Returns a promise that resolves when the response's outgoing request has completed.
+ *
+ * @param response - The response whose request completion should be observed.
+ * @returns The request completion promise, if the transport provides one.
+ */
+function getRequestCompletion(response) {
+    return requestCompletions.get(response);
+}
+/**
+ * Returns a promise that resolves when the response body has completed, errored, or been canceled.
+ *
+ * @param response - The response whose body completion should be observed.
+ * @returns The response body completion promise, if the transport provides one.
+ */
+function getResponseBodyCompletion(response) {
+    return responseBodyCompletions.get(response);
+}
+function isNodeResponseBody(value) {
+    return (typeof value === "object" &&
+        value !== null &&
+        "resume" in value &&
+        typeof value.resume === "function");
+}
+function isNodeEventEmitterBody(value) {
+    return ("on" in value &&
+        typeof value.on === "function" &&
+        "once" in value &&
+        typeof value.once === "function" &&
+        "removeListener" in value &&
+        typeof value.removeListener === "function");
+}
+function isBrowserResponseBody(value) {
+    return (typeof value === "object" &&
+        value !== null &&
+        "cancel" in value &&
+        typeof value.cancel === "function");
+}
+function setResponseBodySource(body, source) {
+    if (isNodeResponseBody(body) && isNodeResponseBody(source)) {
+        responseBodySources.set(body, source);
+    }
+}
+function setResponseBodyDisposer(response, dispose) {
+    responseBodyDisposers.set(response, dispose);
+    return () => {
+        if (responseBodyDisposers.get(response) === dispose) {
+            responseBodyDisposers.delete(response);
+        }
+    };
+}
+/**
+ * Destroys a Node stream, or drains it if destruction is unavailable,
+ * and recursively disposes its tracked upstream sources.
+ */
+function disposeNodeResponseBody(readableStream, disposed = new Set()) {
+    // Avoid disposing a stream twice if the source chain contains a cycle.
+    if (disposed.has(readableStream)) {
+        return;
+    }
+    disposed.add(readableStream);
+    const source = responseBodySources.get(readableStream);
+    responseBodySources.delete(readableStream);
+    if (readableStream.closed !== true) {
+        if (readableStream.destroy) {
+            if (isNodeEventEmitterBody(readableStream)) {
+                const onError = (error) => {
+                    logger$6.warning("Error disposing Node stream", error);
+                };
+                const onClose = () => {
+                    readableStream.removeListener("error", onError);
+                };
+                readableStream.on("error", onError);
+                readableStream.once("close", onClose);
+                try {
+                    readableStream.destroy();
+                }
+                catch (error) {
+                    readableStream.removeListener("error", onError);
+                    readableStream.removeListener("close", onClose);
+                    throw error;
+                }
+            }
+            else {
+                readableStream.destroy();
+            }
+        }
+        else {
+            readableStream.resume();
+        }
+    }
+    if (source) {
+        disposeNodeResponseBody(source, disposed);
+    }
+}
+/**
+ * Disposes a raw Node stream and its tracked upstream sources without throwing.
+ *
+ * @param stream - The stream to destroy, or drain if destruction is unavailable.
+ */
+function disposeNodeStream(stream) {
+    try {
+        disposeNodeResponseBody(stream);
+    }
+    catch (error) {
+        logger$6.warning("Error disposing Node stream", error);
+    }
+}
+/**
+ * Releases the body of a response that will not be read, so the underlying connection can be
+ * reused or closed. Handles Node readable streams and browser web streams, and never throws:
+ * disposal failures are logged as warnings.
+ *
+ * @param response - The response whose `readableStreamBody` or `browserStreamBody` should be disposed.
+ */
+async function disposeResponseBody(response) {
+    try {
+        const dispose = responseBodyDisposers.get(response);
+        responseBodyDisposers.delete(response);
+        try {
+            const readableStream = response.readableStreamBody;
+            if (isNodeResponseBody(readableStream)) {
+                disposeNodeStream(readableStream);
+                return;
+            }
+            const browserStream = response.browserStreamBody;
+            if (isBrowserResponseBody(browserStream)) {
+                await browserStream.cancel();
+            }
+        }
+        finally {
+            dispose?.();
+        }
+    }
+    catch (error) {
+        logger$6.warning("Error disposing response body", error);
+    }
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * This error is thrown when an asynchronous operation has been aborted.
+ * Check for this error by testing the `name` that the name property of the
+ * error matches `"AbortError"`.
+ *
+ * @example
+ * ```ts snippet:AbortErrorSample
+ * import { AbortError } from "@azure/abort-controller";
+ *
+ * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
+ *   if (options.abortSignal.aborted) {
+ *     throw new AbortError();
+ *   }
+ *
+ *   // do async work
+ * }
+ *
+ * const controller = new AbortController();
+ * controller.abort();
+ * try {
+ *   doAsyncWork({ abortSignal: controller.signal });
+ * } catch (e) {
+ *   if (e instanceof Error && e.name === "AbortError") {
+ *     // handle abort error here.
+ *   }
+ * }
+ * ```
+ */
+let AbortError$1 = class AbortError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "AbortError";
+    }
+};
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Creates an abortable promise.
+ * @param buildPromise - A function that takes the resolve and reject functions as parameters.
+ * @param options - The options for the abortable promise.
+ * @returns A promise that can be aborted.
+ */
+function createAbortablePromise(buildPromise, options) {
+    const { cleanupBeforeAbort, abortSignal, abortErrorMsg } = options ?? {};
+    return new Promise((resolve, reject) => {
+        function rejectOnAbort() {
+            reject(new AbortError$1(abortErrorMsg ?? "The operation was aborted."));
+        }
+        function removeListeners() {
+            abortSignal?.removeEventListener("abort", onAbort);
+        }
+        function onAbort() {
+            cleanupBeforeAbort?.();
+            removeListeners();
+            rejectOnAbort();
+        }
+        if (abortSignal?.aborted) {
+            return rejectOnAbort();
+        }
+        try {
+            buildPromise((x) => {
+                removeListeners();
+                resolve(x);
+            }, (x) => {
+                removeListeners();
+                reject(x);
+            });
+        }
+        catch (err) {
+            reject(err);
+        }
+        abortSignal?.addEventListener("abort", onAbort);
+    });
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const StandardAbortMessage$1 = "The delay was aborted.";
+/**
+ * A wrapper for setTimeout that resolves a promise after timeInMs milliseconds.
+ * @param timeInMs - The number of milliseconds to be delayed.
+ * @param options - The options for delay - currently abort options
+ * @returns Promise that is resolved after timeInMs
+ */
+function delay$3(timeInMs, options) {
+    let token;
+    const { abortSignal, abortErrorMsg } = {};
+    return createAbortablePromise((resolve) => {
+        token = setTimeout(resolve, timeInMs);
+    }, {
+        cleanupBeforeAbort: () => clearTimeout(token),
+        abortSignal,
+        abortErrorMsg: abortErrorMsg ?? StandardAbortMessage$1,
+    });
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Given what is thought to be an error object, return the message if possible.
+ * If the message is missing, returns a stringified version of the input.
+ * @param e - Something thrown from a try block
+ * @returns The error message or a string of the input
+ */
+function getErrorMessage(e) {
+    if (isError$1(e)) {
+        return e.message;
+    }
+    else {
+        let stringified;
+        try {
+            if (typeof e === "object" && e) {
+                stringified = JSON.stringify(e);
+            }
+            else {
+                stringified = String(e);
+            }
+        }
+        catch (err) {
+            stringified = "[unable to stringify input]";
+        }
+        return `Unknown error ${stringified}`;
+    }
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Typeguard for an error object shape (has name and message)
+ *
+ * @param e - Something caught by a catch clause.
+ */
+function isError(e) {
+    return isError$1(e);
+}
+/**
+ * A constant that indicates whether the environment the code is running is a Node.js compatible environment.
+ */
+const isNodeLike = isNodeLike$1;
+/**
+ * The helper that transforms bytes with specific character encoding into string
+ * @param bytes - the uint8array bytes
+ * @param format - the format we use to encode the byte
+ * @returns a string of the encoded string
+ */
+function uint8ArrayToString(bytes, format) {
+    return uint8ArrayToString$1(bytes, format);
+}
+/**
+ * The helper that transforms string to specific character encoded bytes array.
+ * @param value - the string to be converted
+ * @param format - the format we use to decode the value
+ * @returns a uint8array
+ */
+function stringToUint8Array(value, format) {
+    return stringToUint8Array$1(value, format);
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Tests an object to determine whether it implements TokenCredential.
+ *
+ * @param credential - The assumed TokenCredential to be tested.
+ */
+function isTokenCredential(credential) {
+    // Check for an object with a 'getToken' function and possibly with
+    // a 'signRequest' function.  We do this check to make sure that
+    // a ServiceClientCredentials implementor (like TokenClientCredentials
+    // in ms-rest-nodeauth) doesn't get mistaken for a TokenCredential if
+    // it doesn't actually implement TokenCredential also.
+    const castCredential = credential;
+    return (castCredential &&
+        typeof castCredential.getToken === "function" &&
+        (castCredential.signRequest === undefined || castCredential.getToken.length > 0));
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * This error is thrown when an asynchronous operation has been aborted.
+ * Check for this error by testing the `name` that the name property of the
+ * error matches `"AbortError"`.
+ *
+ * @example
+ * ```ts snippet:ReadmeSampleAbortError
+ * import { AbortError } from "@typespec/ts-http-runtime";
+ *
+ * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
+ *   if (options.abortSignal.aborted) {
+ *     throw new AbortError();
+ *   }
+ *
+ *   // do async work
+ * }
+ *
+ * const controller = new AbortController();
+ * controller.abort();
+ *
+ * try {
+ *   doAsyncWork({ abortSignal: controller.signal });
+ * } catch (e) {
+ *   if (e instanceof Error && e.name === "AbortError") {
+ *     // handle abort error here.
+ *   }
+ * }
+ * ```
+ */
+class AbortError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "AbortError";
+    }
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+function normalizeName(name) {
     return name.toLowerCase();
 }
-function* headerIterator$1(map) {
+/**
+ * Removes CR and LF characters from a header value to prevent obs-fold
+ * (line folding) sequences, as forbidden by RFC 7230 §3.2.4.
+ * @param value - The header value to sanitize.
+ */
+function normalizeValue(value) {
+    return String(value)
+        .trim()
+        .replace(/[\r\n]/g, "");
+}
+function* headerIterator(map) {
     for (const entry of map.values()) {
         yield [entry.name, entry.value];
     }
 }
-let HttpHeadersImpl$1 = class HttpHeadersImpl {
+class HttpHeadersImpl {
     _headersMap;
     constructor(rawHeaders) {
         this._headersMap = new Map();
@@ -29261,7 +29847,7 @@ let HttpHeadersImpl$1 = class HttpHeadersImpl {
      * @param value - The value of the header to set.
      */
     set(name, value) {
-        this._headersMap.set(normalizeName$1(name), { name, value: String(value).trim() });
+        this._headersMap.set(normalizeName(name), { name, value: normalizeValue(value) });
     }
     /**
      * Get the header value for the provided header name, or undefined if no header exists in this
@@ -29269,21 +29855,21 @@ let HttpHeadersImpl$1 = class HttpHeadersImpl {
      * @param name - The name of the header. This value is case-insensitive.
      */
     get(name) {
-        return this._headersMap.get(normalizeName$1(name))?.value;
+        return this._headersMap.get(normalizeName(name))?.value;
     }
     /**
      * Get whether or not this header collection contains a header entry for the provided header name.
      * @param name - The name of the header to set. This value is case-insensitive.
      */
     has(name) {
-        return this._headersMap.has(normalizeName$1(name));
+        return this._headersMap.has(normalizeName(name));
     }
     /**
      * Remove the header with the provided headerName.
      * @param name - The name of the header to remove.
      */
     delete(name) {
-        this._headersMap.delete(normalizeName$1(name));
+        this._headersMap.delete(normalizeName(name));
     }
     /**
      * Get the JSON object representation of this HTTP header collection.
@@ -29312,20 +29898,20 @@ let HttpHeadersImpl$1 = class HttpHeadersImpl {
      * Iterate over tuples of header [name, value] pairs.
      */
     [Symbol.iterator]() {
-        return headerIterator$1(this._headersMap);
+        return headerIterator(this._headersMap);
     }
-};
+}
 /**
  * Creates an object that satisfies the `HttpHeaders` interface.
  * @param rawHeaders - A simple object representing initial headers
  */
-function createHttpHeaders$2(rawHeaders) {
-    return new HttpHeadersImpl$1(rawHeaders);
+function createHttpHeaders$1(rawHeaders) {
+    return new HttpHeadersImpl(rawHeaders);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-let PipelineRequestImpl$1 = class PipelineRequestImpl {
+class PipelineRequestImpl {
     url;
     method;
     headers;
@@ -29348,7 +29934,7 @@ let PipelineRequestImpl$1 = class PipelineRequestImpl {
     constructor(options) {
         this.url = options.url;
         this.body = options.body;
-        this.headers = options.headers ?? createHttpHeaders$2();
+        this.headers = options.headers ?? createHttpHeaders$1();
         this.method = options.method ?? "GET";
         this.timeout = options.timeout ?? 0;
         this.multipartBody = options.multipartBody;
@@ -29360,31 +29946,31 @@ let PipelineRequestImpl$1 = class PipelineRequestImpl {
         this.abortSignal = options.abortSignal;
         this.onUploadProgress = options.onUploadProgress;
         this.onDownloadProgress = options.onDownloadProgress;
-        this.requestId = options.requestId || randomUUID$1();
+        this.requestId = options.requestId || randomUUID();
         this.allowInsecureConnection = options.allowInsecureConnection ?? false;
         this.enableBrowserStreams = options.enableBrowserStreams ?? false;
         this.requestOverrides = options.requestOverrides;
         this.authSchemes = options.authSchemes;
     }
-};
+}
 /**
  * Creates a new pipeline request with the given options.
  * This method is to allow for the easy setting of default values and not required.
  * @param options - The options to create the request with.
  */
-function createPipelineRequest$3(options) {
-    return new PipelineRequestImpl$1(options);
+function createPipelineRequest$1(options) {
+    return new PipelineRequestImpl(options);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const ValidPhaseNames$1 = new Set(["Deserialize", "Serialize", "Retry", "Sign"]);
+const ValidPhaseNames = new Set(["Deserialize", "Serialize", "Retry", "Sign"]);
 /**
  * A private implementation of Pipeline.
  * Do not export this class from the package.
  * @internal
  */
-let HttpPipeline$1 = class HttpPipeline {
+class HttpPipeline {
     _policies = [];
     _orderedPolicies;
     constructor(policies) {
@@ -29395,10 +29981,10 @@ let HttpPipeline$1 = class HttpPipeline {
         if (options.phase && options.afterPhase) {
             throw new Error("Policies inside a phase cannot specify afterPhase.");
         }
-        if (options.phase && !ValidPhaseNames$1.has(options.phase)) {
+        if (options.phase && !ValidPhaseNames.has(options.phase)) {
             throw new Error(`Invalid phase name: ${options.phase}`);
         }
-        if (options.afterPhase && !ValidPhaseNames$1.has(options.afterPhase)) {
+        if (options.afterPhase && !ValidPhaseNames.has(options.afterPhase)) {
             throw new Error(`Invalid afterPhase name: ${options.afterPhase}`);
         }
         this._policies.push({
@@ -29629,26 +30215,26 @@ let HttpPipeline$1 = class HttpPipeline {
         }
         return result;
     }
-};
+}
 /**
  * Creates a totally empty pipeline.
  * Useful for testing or creating a custom one.
  */
-function createEmptyPipeline$3() {
-    return HttpPipeline$1.create();
+function createEmptyPipeline$1() {
+    return HttpPipeline.create();
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const custom$1 = inspect.custom;
+const custom = inspect.custom;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const errorSanitizer$1 = new Sanitizer$1();
+const errorSanitizer = new Sanitizer();
 /**
  * A custom error type for failed pipeline requests.
  */
-let RestError$3 = class RestError extends Error {
+let RestError$1 = class RestError extends Error {
     /**
      * Something went wrong when making the request.
      * This means the actual request failed for some reason,
@@ -29702,11 +30288,11 @@ let RestError$3 = class RestError extends Error {
             }
             : undefined;
         // Logging method for util.inspect in Node
-        Object.defineProperty(this, custom$1, {
+        Object.defineProperty(this, custom, {
             value: () => {
                 // Extract non-enumerable properties and add them back. This is OK since in this output the request and
                 // response get sanitized.
-                return `RestError: ${this.message} \n ${errorSanitizer$1.sanitize({
+                return `RestError: ${this.message} \n ${errorSanitizer.sanitize({
                     ...this,
                     request: { ...this.request, agent },
                     response: this.response,
@@ -29721,24 +30307,335 @@ let RestError$3 = class RestError extends Error {
  * Typeguard for RestError
  * @param e - Something caught by a catch clause.
  */
-function isRestError$3(e) {
-    if (e instanceof RestError$3) {
+function isRestError$1(e) {
+    // This package declares RestError, so there is exactly one constructor that can produce it
+    // here and the cross-package `instanceof` restriction does not apply. The `name` check below
+    // is the fallback for a RestError built by a second copy of this package.
+    // eslint-disable-next-line no-restricted-syntax
+    if (e instanceof RestError$1) {
         return true;
     }
-    return isError$3(e) && e.name === "RestError";
+    return isError$1(e) && e.name === "RestError";
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$9 = createClientLogger$3("ts-http-runtime");
+/**
+ * Converts a flat `[name, value, ...]` raw header array to `[name, value]` pairs,
+ * or returns an existing pair array unchanged, preserving order and duplicates.
+ *
+ * @param headers - Header names and values in either array format.
+ * @returns The header pairs in their original order.
+ * @see https://nodejs.org/api/http.html#messagerawheaders
+ */
+function getHeaderPairs(headers) {
+    return Array.isArray(headers[0])
+        ? headers
+        : Array.from({ length: Math.ceil(headers.length / 2) }, (_, index) => [
+            headers[index * 2],
+            headers[index * 2 + 1],
+        ]);
+}
+function isIterable(value) {
+    return Symbol.iterator in value && typeof value[Symbol.iterator] === "function";
+}
+function removeContinueToken(value) {
+    if (typeof value === "string") {
+        const tokens = value.split(",");
+        const remaining = tokens.filter((token) => token.trim().toLowerCase() !== "100-continue");
+        if (remaining.length === tokens.length) {
+            return value;
+        }
+        return (remaining
+            .map((token) => token.trim())
+            .filter(Boolean)
+            .join(", ") || undefined);
+    }
+    if (Array.isArray(value)) {
+        const remaining = value.map(removeContinueToken).filter((entry) => entry !== undefined);
+        return remaining.length > 0 ? remaining : undefined;
+    }
+    return value;
+}
+function stripRequestBodyHeaders(request, removeFraming) {
+    const stripHeaderValue = (name, value) => {
+        const lowerName = name.toLowerCase();
+        if (removeFraming &&
+            (lowerName === "content-length" ||
+                lowerName === "transfer-encoding" ||
+                lowerName === "trailer")) {
+            return undefined;
+        }
+        return lowerName === "expect" ? removeContinueToken(value) : value;
+    };
+    const stripHeaderPairs = (pairs) => pairs.flatMap(([name, value]) => {
+        const updated = typeof name === "string" ? stripHeaderValue(name, value) : value;
+        return updated === undefined ? [] : [[name, updated]];
+    });
+    for (const [name, value] of request.headers) {
+        const updated = stripHeaderValue(name, value);
+        if (updated === undefined) {
+            request.headers.delete(name);
+        }
+        else if (typeof updated === "string" && updated !== value) {
+            request.headers.set(name, updated);
+        }
+    }
+    const overrides = request.requestOverrides;
+    if (!overrides || !("headers" in overrides)) {
+        return;
+    }
+    const headers = overrides.headers;
+    if (Array.isArray(headers)) {
+        const updatedPairs = stripHeaderPairs(getHeaderPairs(headers));
+        request.requestOverrides = {
+            ...overrides,
+            headers: Array.isArray(headers[0]) ? updatedPairs : updatedPairs.flat(),
+        };
+    }
+    else if (headers && typeof headers === "object" && isIterable(headers)) {
+        const pairs = Array.from(headers, (entry) => {
+            if (!Array.isArray(entry) || entry.length !== 2) {
+                throw new TypeError("Header entry must be a name/value pair");
+            }
+            return entry;
+        });
+        request.requestOverrides = { ...overrides, headers: stripHeaderPairs(pairs) };
+    }
+    else if (headers && typeof headers === "object") {
+        const updatedHeaders = {};
+        for (const [name, value] of Object.entries(headers)) {
+            const updated = stripHeaderValue(name, value);
+            if (updated !== undefined) {
+                updatedHeaders[name] = updated;
+            }
+        }
+        request.requestOverrides = { ...overrides, headers: updatedHeaders };
+    }
+}
+/**
+ * Removes only the 100-continue expectation from pipeline and replacement headers.
+ * Raw header arrays retain their shape, and caller-supplied override headers are not mutated.
+ * Iterable override collections are materialized as reusable name/value pairs.
+ *
+ * @param request - The request whose body is known to be empty.
+ */
+function removeExpectContinueHeader(request) {
+    stripRequestBodyHeaders(request, false);
+}
+/**
+ * Removes obsolete body framing, trailer declarations, and the 100-continue expectation
+ * after discarding a body.
+ *
+ * @param request - The request whose body has been discarded.
+ */
+function removeRequestBodyHeaders(request) {
+    stripRequestBodyHeaders(request, true);
+}
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const DEFAULT_TLS_SETTINGS$1 = {};
-function isReadableStream$1(body) {
-    return body && typeof body.pipe === "function";
+const EXPECT_CONTINUE_TIMEOUT_IN_MS = 1000;
+function getHeaderValues(headers, name) {
+    if (Array.isArray(headers)) {
+        return getHeaderPairs(headers)
+            .filter(([key]) => typeof key === "string" && key.toLowerCase() === name)
+            .flatMap(([, value]) => (Array.isArray(value) ? value : [value]));
+    }
+    if (headers && typeof headers === "object") {
+        if ("get" in headers && typeof headers.get === "function") {
+            const value = headers.get(name);
+            return value === undefined || value === null ? [] : [value];
+        }
+        let value;
+        for (const [key, entry] of Object.entries(headers)) {
+            if (key.toLowerCase() === name) {
+                value = entry;
+            }
+        }
+        return value === undefined ? [] : Array.isArray(value) ? value : [value];
+    }
+    return [];
 }
-function isStreamComplete$1(stream) {
+function getEffectiveHeaderValues(request, name) {
+    const headers = request.requestOverrides && "headers" in request.requestOverrides
+        ? request.requestOverrides.headers
+        : request.headers;
+    return getHeaderValues(headers, name.toLowerCase());
+}
+function hasExpectContinue(request) {
+    return getEffectiveHeaderValues(request, "expect").some((value) => typeof value === "string" &&
+        value.split(",").some((token) => token.trim().toLowerCase() === "100-continue"));
+}
+function addHeader(headers, name, value) {
+    if (!Array.isArray(headers)) {
+        return { ...headers, [name]: value };
+    }
+    return Array.isArray(headers[0]) ? [...headers, [name, value]] : [...headers, name, value];
+}
+function hasHeader(headers, name) {
+    if (Array.isArray(headers)) {
+        return getHeaderPairs(headers).some(([key]) => typeof key === "string" && key.toLowerCase() === name);
+    }
+    return Object.keys(headers ?? {}).some((key) => key.toLowerCase() === name);
+}
+function addExpectContinueFraming(options, bodyLength) {
+    if (hasHeader(options.headers, "content-length") ||
+        hasHeader(options.headers, "transfer-encoding")) {
+        return;
+    }
+    options.headers = addHeader(options.headers, bodyLength === null ? "Transfer-Encoding" : "Content-Length", bodyLength === null ? "chunked" : String(bodyLength));
+}
+function createExpectContinueRequest(options) {
+    let fallback;
+    let waiting = true;
+    let bodyStarted = false;
+    let errorReported = false;
+    let request;
+    let bodyError;
+    const bodyStream = options.bodyStream;
+    // Error observation must not consume a caller-owned source before upload permission.
+    bodyStream?.once("error", onBodyError);
+    if (bodyStream && "errored" in bodyStream && bodyStream.errored instanceof Error) {
+        // destroy(error) may still have its error event queued on the next tick.
+        process.nextTick(onBodyError, bodyStream.errored);
+        return;
+    }
+    try {
+        request = options.createRequest(onResponse);
+    }
+    catch (error) {
+        onError(error);
+        return;
+    }
+    function stopWaiting(keepBodyObserved = false) {
+        waiting = false;
+        if (fallback !== undefined) {
+            clearTimeout(fallback);
+            fallback = undefined;
+        }
+        request?.removeListener("continue", sendBody);
+        request?.removeListener("socket", onSocket);
+        if (!keepBodyObserved) {
+            bodyStream?.removeListener("error", onBodyError);
+        }
+    }
+    function onError(error) {
+        const requestError = error instanceof Error ? error : new Error(String(error));
+        // destroy() may emit no error on a closed request, or emit this error again on a live one.
+        if (!errorReported) {
+            errorReported = true;
+            stopWaiting();
+            options.onError(requestError);
+        }
+        return requestError;
+    }
+    function onBodyError(error) {
+        if (errorReported || (!waiting && !bodyStarted)) {
+            return;
+        }
+        errorReported = true;
+        bodyError = error instanceof Error ? error : new Error(String(error));
+        stopWaiting();
+        options.onBodyError(error);
+        request?.destroy(bodyError);
+    }
+    function sendBody() {
+        if (!waiting) {
+            return;
+        }
+        bodyStarted = true;
+        stopWaiting(true);
+        try {
+            options.sendBody(request);
+        }
+        catch (error) {
+            onBodyError(error);
+        }
+        finally {
+            // The upload path now observes the source, including synchronous failures while piping.
+            bodyStream?.removeListener("error", onBodyError);
+        }
+    }
+    function onAbort() {
+        stopWaiting();
+        options.onAbort(request);
+    }
+    function onSocket() {
+        if (!waiting) {
+            return;
+        }
+        try {
+            request.flushHeaders();
+            if (!waiting) {
+                return;
+            }
+            // This ordered write excludes connection setup and preceding header writes from the timeout.
+            request.write("", (error) => {
+                if (error) {
+                    request.destroy(onError(error));
+                }
+                else if (waiting) {
+                    fallback = setTimeout(sendBody, EXPECT_CONTINUE_TIMEOUT_IN_MS);
+                }
+            });
+        }
+        catch (error) {
+            request.destroy(onError(error));
+        }
+    }
+    function onResponse(response) {
+        stopWaiting();
+        if (!bodyStarted) {
+            request.shouldKeepAlive = false;
+            const destroyRequest = () => {
+                response.removeListener("end", destroyRequest);
+                response.removeListener("close", destroyRequest);
+                request.destroy();
+            };
+            response.once("end", destroyRequest);
+            response.once("close", destroyRequest);
+            if (response.readableEnded || response.destroyed) {
+                destroyRequest();
+            }
+        }
+        options.onResponse(response);
+    }
+    request.once("error", onError);
+    if (bodyError) {
+        request.destroy(bodyError);
+        return;
+    }
+    if (options.abortSignal.aborted) {
+        onAbort();
+        return;
+    }
+    options.abortSignal.addEventListener("abort", onAbort, { once: true });
+    // Request close can precede consumption of buffered response data.
+    // Keep private abort forwarding until sendRequest's outer lifecycle disconnects the caller.
+    request.once("close", () => stopWaiting());
+    if (request.destroyed || request.closed) {
+        stopWaiting();
+    }
+    if (!waiting) {
+        return;
+    }
+    request.once("continue", sendBody);
+    if (request.socket) {
+        onSocket();
+    }
+    else {
+        request.once("socket", onSocket);
+    }
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const DEFAULT_TLS_SETTINGS = {};
+function isReadableStream(body) {
+    return (typeof body === "object" && body !== null && "pipe" in body && typeof body.pipe === "function");
+}
+function isStreamComplete(stream) {
     if (stream.readable === false) {
         return Promise.resolve();
     }
@@ -29754,10 +30651,18 @@ function isStreamComplete$1(stream) {
         stream.on("error", handler);
     });
 }
-function isArrayBuffer$1(body) {
-    return body && typeof body.byteLength === "number";
+function isArrayBuffer(body) {
+    return types.isArrayBuffer(body) || ArrayBuffer.isView(body);
 }
-let ReportTransform$1 = class ReportTransform extends Transform {
+function arrayBufferToBuffer(body) {
+    if (Buffer.isBuffer(body)) {
+        return body;
+    }
+    return ArrayBuffer.isView(body)
+        ? Buffer.from(body.buffer, body.byteOffset, body.byteLength)
+        : Buffer.from(body);
+}
+class ReportTransform extends Transform {
     loadedBytes = 0;
     progressCallback;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -29776,12 +30681,114 @@ let ReportTransform$1 = class ReportTransform extends Transform {
         super();
         this.progressCallback = progressCallback;
     }
-};
+}
+function createRequestLifecycle(request, options, isInsecure, resolve, reject) {
+    let clientRequest;
+    let response;
+    let requestDone = false;
+    let resolveRequestComplete;
+    const requestComplete = new Promise((_resolve) => {
+        resolveRequestComplete = _resolve;
+    });
+    const onComplete = () => {
+        requestDone = true;
+        clientRequest.removeListener("finish", onComplete);
+        clientRequest.removeListener("close", onComplete);
+        resolveRequestComplete();
+    };
+    const onResponse = (incomingResponse) => {
+        response = incomingResponse;
+        resolve({
+            response: incomingResponse,
+            requestComplete,
+            isRequestComplete: () => requestDone,
+            disposeRequest: () => {
+                if (!requestDone) {
+                    clientRequest.destroy();
+                }
+            },
+        });
+    };
+    return {
+        createRequest: (onResponseCallback = onResponse) => {
+            clientRequest = isInsecure
+                ? http$1.request(options, onResponseCallback)
+                : https$1.request(options, onResponseCallback);
+            clientRequest.once("finish", onComplete);
+            clientRequest.once("close", onComplete);
+            return clientRequest;
+        },
+        onResponse,
+        rejectRequest: (error) => {
+            reject(toRequestSendError(error, request));
+        },
+        abortRequest: (req) => {
+            const abortError = new AbortError("The operation was aborted. Rejecting from abort signal callback while making request.");
+            response?.destroy(abortError);
+            req.destroy(abortError);
+            reject(abortError);
+        },
+    };
+}
+function toRequestSendError(error, request) {
+    if (isRestError$1(error)) {
+        return error;
+    }
+    const prematureClose = error.code === "ERR_STREAM_PREMATURE_CLOSE";
+    return new RestError$1(prematureClose ? "Request body stream closed before ending" : error.message, {
+        code: prematureClose
+            ? RestError$1.REQUEST_SEND_ERROR
+            : (error.code ?? RestError$1.REQUEST_SEND_ERROR),
+        request,
+    });
+}
+function sendRequestBody(clientRequest, body, request, onError) {
+    if (body && isReadableStream(body)) {
+        pipeUploadStream(body, clientRequest, request, onError);
+    }
+    else if (body) {
+        if (typeof body === "string" || Buffer.isBuffer(body)) {
+            clientRequest.end(body);
+        }
+        else {
+            logger$6.error("Unrecognized body type", body);
+            throw new RestError$1("Unrecognized body type", { request });
+        }
+    }
+    else {
+        clientRequest.end();
+    }
+}
+function prepareRequestBody(request, useExpectContinue) {
+    const requestBody = request.body;
+    const resolvedBody = typeof requestBody === "function" ? requestBody() : requestBody;
+    const body = resolvedBody && isArrayBuffer(resolvedBody) ? arrayBufferToBuffer(resolvedBody) : resolvedBody;
+    if (!useExpectContinue && body && !request.headers.has("Content-Length")) {
+        const bodyLength = getBodyLength(body);
+        if (bodyLength !== null) {
+            request.headers.set("Content-Length", bodyLength);
+        }
+    }
+    if (!body || !request.onUploadProgress) {
+        return body;
+    }
+    const uploadReportStream = new ReportTransform(request.onUploadProgress);
+    uploadReportStream.on("error", (e) => {
+        logger$6.error("Error in upload progress", e);
+    });
+    if (isReadableStream(body)) {
+        pipeUploadStream(body, uploadReportStream, request);
+    }
+    else {
+        uploadReportStream.end(body);
+    }
+    return uploadReportStream;
+}
 /**
  * A HttpClient implementation that uses Node's "https" module to send HTTPS requests.
  * @internal
  */
-let NodeHttpClient$1 = class NodeHttpClient {
+class NodeHttpClient {
     cachedHttpAgent;
     cachedHttpsAgents = new WeakMap();
     /**
@@ -29789,80 +30796,91 @@ let NodeHttpClient$1 = class NodeHttpClient {
      * @param request - The request to be made.
      */
     async sendRequest(request) {
+        const requestBody = request.body;
         const abortController = new AbortController();
         let abortListener;
-        if (request.abortSignal) {
-            if (request.abortSignal.aborted) {
-                throw new AbortError$2("The operation was aborted. Request has already been canceled.");
+        const requestAbortSignal = request.abortSignal;
+        if (requestAbortSignal) {
+            if (requestAbortSignal.aborted) {
+                throw new AbortError("The operation was aborted. Request has already been canceled.");
             }
             abortListener = (event) => {
                 if (event.type === "abort") {
                     abortController.abort();
                 }
             };
-            request.abortSignal.addEventListener("abort", abortListener);
+            requestAbortSignal.addEventListener("abort", abortListener);
         }
         let timeoutId;
         if (request.timeout > 0) {
             timeoutId = setTimeout(() => {
-                const sanitizer = new Sanitizer$1();
-                logger$9.info(`request to '${sanitizer.sanitizeUrl(request.url)}' timed out. canceling...`);
+                const sanitizer = new Sanitizer();
+                logger$6.info(`request to '${sanitizer.sanitizeUrl(request.url)}' timed out. canceling...`);
                 abortController.abort();
             }, request.timeout);
         }
         const acceptEncoding = request.headers.get("Accept-Encoding");
         const shouldDecompress = acceptEncoding?.includes("gzip") || acceptEncoding?.includes("deflate");
-        let body = typeof request.body === "function" ? request.body() : request.body;
-        if (body && !request.headers.has("Content-Length")) {
-            const bodyLength = getBodyLength$1(body);
-            if (bodyLength !== null) {
-                request.headers.set("Content-Length", bodyLength);
-            }
-        }
+        // Keep input separate from the prepared upload. Even a direct stream must leave body
+        // undefined until preparation starts, so early rejection does not transfer its ownership.
+        let body;
         let responseStream;
+        let requestComplete = Promise.resolve();
         try {
-            if (body && request.onUploadProgress) {
-                const onUploadProgress = request.onUploadProgress;
-                const uploadReportStream = new ReportTransform$1(onUploadProgress);
-                uploadReportStream.on("error", (e) => {
-                    logger$9.error("Error in upload progress", e);
-                });
-                if (isReadableStream$1(body)) {
-                    body.pipe(uploadReportStream);
-                }
-                else {
-                    uploadReportStream.end(body);
-                }
-                body = uploadReportStream;
+            let useExpectContinue = hasExpectContinue(request);
+            const knownBodyLength = useExpectContinue && typeof requestBody !== "function"
+                ? getBodyLength(requestBody ?? null)
+                : null;
+            if (knownBodyLength === 0) {
+                removeExpectContinueHeader(request);
+                useExpectContinue = false;
             }
-            const res = await this.makeRequest(request, abortController, body);
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
+            if (!useExpectContinue) {
+                body = prepareRequestBody(request, false);
             }
-            const headers = getResponseHeaders$1(res);
+            const result = useExpectContinue
+                ? await this.makeRequestWithExpectContinue(request, abortController, () => {
+                    body = prepareRequestBody(request, true);
+                    return body;
+                }, knownBodyLength)
+                : await this.makeRequest(request, abortController, body);
+            requestComplete = result.requestComplete;
+            const res = result.response;
+            const headers = getResponseHeaders(res);
             const status = res.statusCode ?? 0;
             const response = {
                 status,
                 headers,
                 request,
             };
+            if (!result.isRequestComplete()) {
+                setRequestCompletion(response, result.requestComplete);
+                const clearDisposer = setResponseBodyDisposer(response, result.disposeRequest);
+                result.requestComplete.then(clearDisposer).catch((error) => {
+                    logger$6.warning("Error disposing request", error);
+                });
+            }
             // Responses to HEAD must not have a body.
             // If they do return a body, that body must be ignored.
-            if (request.method === "HEAD") {
+            const method = typeof request.requestOverrides?.method === "string"
+                ? request.requestOverrides.method.toUpperCase()
+                : request.method;
+            if (method === "HEAD") {
                 // call resume() and not destroy() to avoid closing the socket
                 // and losing keep alive
                 res.resume();
                 return response;
             }
-            responseStream = shouldDecompress ? getDecodedResponseStream$1(res, headers) : res;
+            responseStream = shouldDecompress
+                ? getDecodedResponseStream(res, headers, abortController.signal)
+                : res;
             const onDownloadProgress = request.onDownloadProgress;
             if (onDownloadProgress) {
-                const downloadReportStream = new ReportTransform$1(onDownloadProgress);
+                const downloadReportStream = new ReportTransform(onDownloadProgress);
                 downloadReportStream.on("error", (e) => {
-                    logger$9.error("Error in download progress", e);
+                    logger$6.error("Error in download progress", e);
                 });
-                responseStream.pipe(downloadReportStream);
-                responseStream = downloadReportStream;
+                responseStream = pipeResponseStream(responseStream, downloadReportStream, abortController.signal);
             }
             if (
             // Value of POSITIVE_INFINITY in streamResponseStatusCodes is considered as any status code
@@ -29871,80 +30889,99 @@ let NodeHttpClient$1 = class NodeHttpClient {
                 response.readableStreamBody = responseStream;
             }
             else {
-                response.bodyAsText = await streamToText$1(responseStream);
+                response.bodyAsText = await streamToText(responseStream);
             }
             return response;
         }
+        catch (error) {
+            // Dispose only the prepared upload. If preparation never ran, body is undefined
+            // and the caller's untouched input stream is left alone.
+            if (isReadableStream(body)) {
+                disposeNodeStream(body);
+            }
+            if (responseStream) {
+                disposeNodeStream(responseStream);
+            }
+            throw error;
+        }
         finally {
-            // clean up event listener
-            if (request.abortSignal && abortListener) {
+            if (timeoutId !== undefined) {
+                clearTimeout(timeoutId);
+            }
+            // Keep abort forwarding until the outgoing request and response have both completed.
+            if (requestAbortSignal && abortListener) {
                 let uploadStreamDone = Promise.resolve();
-                if (isReadableStream$1(body)) {
-                    uploadStreamDone = isStreamComplete$1(body);
+                // Wait only for a prepared upload. If preparation never ran, body is undefined,
+                // so the caller's untouched input stream cannot block abort-listener cleanup.
+                if (isReadableStream(body)) {
+                    uploadStreamDone = isStreamComplete(body);
                 }
                 let downloadStreamDone = Promise.resolve();
-                if (isReadableStream$1(responseStream)) {
-                    downloadStreamDone = isStreamComplete$1(responseStream);
+                if (isReadableStream(responseStream)) {
+                    downloadStreamDone = isStreamComplete(responseStream);
                 }
-                Promise.all([uploadStreamDone, downloadStreamDone])
+                Promise.all([requestComplete, uploadStreamDone, downloadStreamDone])
                     .then(() => {
                     // eslint-disable-next-line promise/always-return
                     if (abortListener) {
-                        request.abortSignal?.removeEventListener("abort", abortListener);
+                        requestAbortSignal.removeEventListener("abort", abortListener);
                     }
                 })
                     .catch((e) => {
-                    logger$9.warning("Error when cleaning up abortListener on httpRequest", e);
+                    logger$6.warning("Error when cleaning up abortListener on httpRequest", e);
                 });
             }
         }
     }
     makeRequest(request, abortController, body) {
+        const { options, isInsecure } = this.getRequestOptions(request);
+        return new Promise((resolve, reject) => {
+            const { createRequest, rejectRequest, abortRequest } = createRequestLifecycle(request, options, isInsecure, resolve, reject);
+            const req = createRequest();
+            req.once("error", rejectRequest);
+            abortController.signal.addEventListener("abort", () => abortRequest(req));
+            sendRequestBody(req, body, request, rejectRequest);
+        });
+    }
+    makeRequestWithExpectContinue(request, abortController, prepareBody, knownBodyLength) {
+        const { options, isInsecure } = this.getRequestOptions(request);
+        addExpectContinueFraming(options, knownBodyLength);
+        return new Promise((resolve, reject) => {
+            const { createRequest, onResponse, rejectRequest, abortRequest } = createRequestLifecycle(request, options, isInsecure, resolve, reject);
+            createExpectContinueRequest({
+                abortSignal: abortController.signal,
+                bodyStream: isReadableStream(request.body) ? request.body : undefined,
+                createRequest,
+                onAbort: abortRequest,
+                onError: rejectRequest,
+                onBodyError: reject,
+                onResponse,
+                sendBody: (clientRequest) => {
+                    const body = prepareBody();
+                    sendRequestBody(clientRequest, body, request, rejectRequest);
+                },
+            });
+        });
+    }
+    getRequestOptions(request) {
         const url = new URL(request.url);
         const isInsecure = url.protocol !== "https:";
         if (isInsecure && !request.allowInsecureConnection) {
             throw new Error(`Cannot connect to ${request.url} while allowInsecureConnection is false.`);
         }
         const agent = request.agent ?? this.getOrCreateAgent(request, isInsecure);
-        const options = {
-            agent,
-            hostname: url.hostname,
-            path: `${url.pathname}${url.search}`,
-            port: url.port,
-            method: request.method,
-            headers: request.headers.toJSON({ preserveCase: true }),
-            ...request.requestOverrides,
+        return {
+            isInsecure,
+            options: {
+                agent,
+                hostname: url.hostname,
+                path: `${url.pathname}${url.search}`,
+                port: url.port,
+                method: request.method,
+                headers: request.headers.toJSON({ preserveCase: true }),
+                ...request.requestOverrides,
+            },
         };
-        return new Promise((resolve, reject) => {
-            const req = isInsecure ? http$1.request(options, resolve) : https$1.request(options, resolve);
-            req.once("error", (err) => {
-                reject(new RestError$3(err.message, { code: err.code ?? RestError$3.REQUEST_SEND_ERROR, request }));
-            });
-            abortController.signal.addEventListener("abort", () => {
-                const abortError = new AbortError$2("The operation was aborted. Rejecting from abort signal callback while making request.");
-                req.destroy(abortError);
-                reject(abortError);
-            });
-            if (body && isReadableStream$1(body)) {
-                body.pipe(req);
-            }
-            else if (body) {
-                if (typeof body === "string" || Buffer.isBuffer(body)) {
-                    req.end(body);
-                }
-                else if (isArrayBuffer$1(body)) {
-                    req.end(ArrayBuffer.isView(body) ? Buffer.from(body.buffer) : Buffer.from(body));
-                }
-                else {
-                    logger$9.error("Unrecognized body type", body);
-                    reject(new RestError$3("Unrecognized body type"));
-                }
-            }
-            else {
-                // streams don't like "undefined" being passed as data
-                req.end();
-            }
-        });
     }
     getOrCreateAgent(request, isInsecure) {
         const disableKeepAlive = request.disableKeepAlive;
@@ -29967,14 +31004,14 @@ let NodeHttpClient$1 = class NodeHttpClient {
                 return https$1.globalAgent;
             }
             // We use the tlsSettings to index cached clients
-            const tlsSettings = request.tlsSettings ?? DEFAULT_TLS_SETTINGS$1;
+            const tlsSettings = request.tlsSettings ?? DEFAULT_TLS_SETTINGS;
             // Get the cached agent or create a new one with the
             // provided values for keepAlive and tlsSettings
             let agent = this.cachedHttpsAgents.get(tlsSettings);
             if (agent && agent.options.keepAlive === !disableKeepAlive) {
                 return agent;
             }
-            logger$9.info("No cached TLS Agent exist, creating a new Agent");
+            logger$6.info("No cached TLS Agent exist, creating a new Agent");
             agent = new https$1.Agent({
                 // keepAlive is true if disableKeepAlive is false.
                 keepAlive: !disableKeepAlive,
@@ -29985,9 +31022,9 @@ let NodeHttpClient$1 = class NodeHttpClient {
             return agent;
         }
     }
-};
-function getResponseHeaders$1(res) {
-    const headers = createHttpHeaders$2();
+}
+function getResponseHeaders(res) {
+    const headers = createHttpHeaders$1();
     for (const header of Object.keys(res.headers)) {
         const value = res.headers[header];
         if (Array.isArray(value)) {
@@ -30001,62 +31038,103 @@ function getResponseHeaders$1(res) {
     }
     return headers;
 }
-function getDecodedResponseStream$1(stream, headers) {
+function getDecodedResponseStream(stream, headers, abortSignal) {
     const contentEncoding = headers.get("Content-Encoding");
     if (contentEncoding === "gzip") {
-        const unzip = zlib.createGunzip();
-        stream.pipe(unzip);
-        return unzip;
+        return pipeResponseStream(stream, zlib.createGunzip(), abortSignal);
     }
     else if (contentEncoding === "deflate") {
-        const inflate = zlib.createInflate();
-        stream.pipe(inflate);
-        return inflate;
+        return pipeResponseStream(stream, zlib.createInflate(), abortSignal);
     }
     return stream;
 }
-function streamToText$1(stream) {
+function pipeUploadStream(source, destination, request, onError) {
+    let tearingDown = false;
+    const cleanupFinished = finished(source, { writable: false }, onSourceComplete);
+    function onSourceComplete(error) {
+        cleanupFinished();
+        destination.removeListener("close", onDestinationClose);
+        if (error && !tearingDown) {
+            const requestError = toRequestSendError(error, request);
+            destination.destroy(requestError);
+            onError?.(requestError);
+        }
+    }
+    function onDestinationClose() {
+        // Keep observing the source, but do not forward failures caused by intentional teardown.
+        tearingDown = true;
+        source.unpipe(destination);
+        disposeNodeStream(source);
+    }
+    destination.once("close", onDestinationClose);
+    source.pipe(destination);
+}
+function pipeResponseStream(source, destination, abortSignal) {
+    setResponseBodySource(destination, source);
+    let cleanupSource = () => { };
+    let cleanupDestination = () => { };
+    cleanupSource = finished(source, { writable: false }, (error) => {
+        cleanupSource();
+        if (error) {
+            destination.destroy(abortSignal.aborted ? new AbortError() : error);
+        }
+    });
+    cleanupDestination = finished(destination, { writable: false }, () => {
+        cleanupDestination();
+        // Keep the source observer until its own completion, including any queued error.
+        source.unpipe(destination);
+        if (source.readable) {
+            disposeNodeStream(source);
+        }
+    });
+    return source.pipe(destination);
+}
+function streamToText(stream) {
     return new Promise((resolve, reject) => {
         const buffer = [];
-        stream.on("data", (chunk) => {
+        const cleanupFinished = finished(stream, { writable: false }, onComplete);
+        function onData(chunk) {
             if (Buffer.isBuffer(chunk)) {
                 buffer.push(chunk);
             }
             else {
                 buffer.push(Buffer.from(chunk));
             }
-        });
-        stream.on("end", () => {
-            resolve(Buffer.concat(buffer).toString("utf8"));
-        });
-        stream.on("error", (e) => {
-            if (e && e?.name === "AbortError") {
-                reject(e);
+        }
+        function onComplete(error) {
+            cleanupFinished();
+            stream.removeListener("data", onData);
+            if (error?.name === "AbortError") {
+                reject(error);
             }
-            else {
-                reject(new RestError$3(`Error reading response as text: ${e.message}`, {
-                    code: RestError$3.PARSE_ERROR,
+            else if (error) {
+                reject(new RestError$1(`Error reading response as text: ${error.message}`, {
+                    code: RestError$1.PARSE_ERROR,
                 }));
             }
-        });
+            else {
+                resolve(Buffer.concat(buffer).toString("utf8"));
+            }
+        }
+        stream.on("data", onData);
     });
 }
 /** @internal */
-function getBodyLength$1(body) {
+function getBodyLength(body) {
     if (!body) {
         return 0;
     }
     else if (Buffer.isBuffer(body)) {
         return body.length;
     }
-    else if (isReadableStream$1(body)) {
+    else if (isReadableStream(body)) {
         return null;
     }
-    else if (isArrayBuffer$1(body)) {
+    else if (isArrayBuffer(body)) {
         return body.byteLength;
     }
     else if (typeof body === "string") {
-        return Buffer.from(body).length;
+        return Buffer.byteLength(body);
     }
     else {
         return null;
@@ -30066,8 +31144,8 @@ function getBodyLength$1(body) {
  * Create a new HttpClient instance for the NodeJS environment.
  * @internal
  */
-function createNodeHttpClient$1() {
-    return new NodeHttpClient$1();
+function createNodeHttpClient() {
+    return new NodeHttpClient();
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -30075,8 +31153,8 @@ function createNodeHttpClient$1() {
 /**
  * Create the correct HttpClient for the current environment.
  */
-function createDefaultHttpClient$3() {
-    return createNodeHttpClient$1();
+function createDefaultHttpClient$1() {
+    return createNodeHttpClient();
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -30084,19 +31162,19 @@ function createDefaultHttpClient$3() {
 /**
  * The programmatic identifier of the logPolicy.
  */
-const logPolicyName$1 = "logPolicy";
+const logPolicyName = "logPolicy";
 /**
  * A policy that logs all requests and responses.
  * @param options - Options to configure logPolicy.
  */
-function logPolicy$3(options = {}) {
-    const logger = options.logger ?? logger$9.info;
-    const sanitizer = new Sanitizer$1({
+function logPolicy$1(options = {}) {
+    const logger = options.logger ?? logger$6.info;
+    const sanitizer = new Sanitizer({
         additionalAllowedHeaderNames: options.additionalAllowedHeaderNames,
         additionalAllowedQueryParameters: options.additionalAllowedQueryParameters,
     });
     return {
-        name: logPolicyName$1,
+        name: logPolicyName,
         async sendRequest(request, next) {
             if (!logger.enabled) {
                 return next(request);
@@ -30104,7 +31182,7 @@ function logPolicy$3(options = {}) {
             logger(`Request: ${sanitizer.sanitize(request)}`);
             const response = await next(request);
             logger(`Response status code: ${response.status}`);
-            logger(`Headers: ${sanitizer.sanitize(response.headers)}`);
+            logger(`Headers: ${sanitizer.sanitize({ headers: response.headers })}`);
             return response;
         },
     };
@@ -30112,94 +31190,11 @@ function logPolicy$3(options = {}) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-/**
- * The programmatic identifier of the redirectPolicy.
- */
-const redirectPolicyName$1 = "redirectPolicy";
-/**
- * Methods that are allowed to follow redirects 301 and 302
- */
-const allowedRedirect$1 = ["GET", "HEAD"];
-/**
- * A policy to follow Location headers from the server in order
- * to support server-side redirection.
- * In the browser, this policy is not used.
- * @param options - Options to control policy behavior.
- */
-function redirectPolicy$3(options = {}) {
-    const { maxRetries = 20, allowCrossOriginRedirects = false } = options;
-    return {
-        name: redirectPolicyName$1,
-        async sendRequest(request, next) {
-            const response = await next(request);
-            return handleRedirect$1(next, response, maxRetries, allowCrossOriginRedirects);
-        },
-    };
-}
-async function handleRedirect$1(next, response, maxRetries, allowCrossOriginRedirects, currentRetries = 0) {
-    const { request, status, headers } = response;
-    const locationHeader = headers.get("location");
-    if (locationHeader &&
-        (status === 300 ||
-            (status === 301 && allowedRedirect$1.includes(request.method)) ||
-            (status === 302 && allowedRedirect$1.includes(request.method)) ||
-            (status === 303 && request.method === "POST") ||
-            status === 307) &&
-        currentRetries < maxRetries) {
-        const url = new URL(locationHeader, request.url);
-        // Only follow redirects to the same origin by default.
-        if (!allowCrossOriginRedirects) {
-            const originalUrl = new URL(request.url);
-            if (url.origin !== originalUrl.origin) {
-                logger$9.verbose(`Skipping cross-origin redirect from ${originalUrl.origin} to ${url.origin}.`);
-                return response;
-            }
-        }
-        request.url = url.toString();
-        // POST request with Status code 303 should be converted into a
-        // redirected GET request if the redirect url is present in the location header
-        if (status === 303) {
-            request.method = "GET";
-            request.headers.delete("Content-Length");
-            delete request.body;
-        }
-        request.headers.delete("Authorization");
-        const res = await next(request);
-        return handleRedirect$1(next, res, maxRetries, allowCrossOriginRedirects, currentRetries + 1);
-    }
-    return response;
-}
+const DEFAULT_RETRY_POLICY_COUNT = 3;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const DEFAULT_RETRY_POLICY_COUNT$1 = 3;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the decompressResponsePolicy.
- */
-const decompressResponsePolicyName$1 = "decompressResponsePolicy";
-/**
- * A policy to enable response decompression according to Accept-Encoding header
- * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
- */
-function decompressResponsePolicy$3() {
-    return {
-        name: decompressResponsePolicyName$1,
-        async sendRequest(request, next) {
-            // HEAD requests have no body
-            if (request.method !== "HEAD") {
-                request.headers.set("Accept-Encoding", "gzip,deflate");
-            }
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const StandardAbortMessage$2 = "The operation was aborted.";
+const StandardAbortMessage = "The operation was aborted.";
 /**
  * A wrapper for setTimeout that resolves a promise after delayInMs milliseconds.
  * @param delayInMs - The number of milliseconds to be delayed.
@@ -30209,12 +31204,12 @@ const StandardAbortMessage$2 = "The operation was aborted.";
  *                  - abortErrorMsg - The abort error message associated with containing operation.
  * @returns Resolved promise
  */
-function delay$4(delayInMs, value, options) {
+function delay$2(delayInMs, value, options) {
     return new Promise((resolve, reject) => {
         let timer = undefined;
         let onAborted = undefined;
         const rejectOnAbort = () => {
-            return reject(new AbortError$2(options?.abortErrorMsg ? options?.abortErrorMsg : StandardAbortMessage$2));
+            return reject(new AbortError(options?.abortErrorMsg ? options?.abortErrorMsg : StandardAbortMessage));
         };
         const removeListeners = () => {
             if (options?.abortSignal && onAborted) {
@@ -30244,7 +31239,7 @@ function delay$4(delayInMs, value, options) {
  * @internal
  * @returns the parsed value or undefined if the parsed value is invalid.
  */
-function parseHeaderValueAsNumber$1(response, headerName) {
+function parseHeaderValueAsNumber(response, headerName) {
     const value = response.headers.get(headerName);
     if (!value)
         return;
@@ -30260,7 +31255,7 @@ function parseHeaderValueAsNumber$1(response, headerName) {
  * The header that comes back from services representing
  * the amount of time (minimum) to wait to retry (in seconds or timestamp after which we can retry).
  */
-const RetryAfterHeader$1 = "Retry-After";
+const RetryAfterHeader = "Retry-After";
 /**
  * The headers that come back from services representing
  * the amount of time (minimum) to wait to retry.
@@ -30268,7 +31263,7 @@ const RetryAfterHeader$1 = "Retry-After";
  * "retry-after-ms", "x-ms-retry-after-ms" : milliseconds
  * "Retry-After" : seconds or timestamp
  */
-const AllRetryAfterHeaders$1 = ["retry-after-ms", "x-ms-retry-after-ms", RetryAfterHeader$1];
+const AllRetryAfterHeaders = ["retry-after-ms", "x-ms-retry-after-ms", RetryAfterHeader];
 /**
  * A response is a throttling retry response if it has a throttling status code (429 or 503),
  * as long as one of the [ "Retry-After" or "retry-after-ms" or "x-ms-retry-after-ms" ] headers has a valid value.
@@ -30278,22 +31273,22 @@ const AllRetryAfterHeaders$1 = ["retry-after-ms", "x-ms-retry-after-ms", RetryAf
  *
  * @internal
  */
-function getRetryAfterInMs$1(response) {
+function getRetryAfterInMs(response) {
     if (!(response && [429, 503].includes(response.status)))
         return undefined;
     try {
         // Headers: "retry-after-ms", "x-ms-retry-after-ms", "Retry-After"
-        for (const header of AllRetryAfterHeaders$1) {
-            const retryAfterValue = parseHeaderValueAsNumber$1(response, header);
+        for (const header of AllRetryAfterHeaders) {
+            const retryAfterValue = parseHeaderValueAsNumber(response, header);
             if (retryAfterValue === 0 || retryAfterValue) {
                 // "Retry-After" header ==> seconds
                 // "retry-after-ms", "x-ms-retry-after-ms" headers ==> milli-seconds
-                const multiplyingFactor = header === RetryAfterHeader$1 ? 1000 : 1;
+                const multiplyingFactor = header === RetryAfterHeader ? 1000 : 1;
                 return retryAfterValue * multiplyingFactor; // in milli-seconds
             }
         }
         // RetryAfterHeader ("Retry-After") has a special case where it might be formatted as a date instead of a number of seconds
-        const retryAfterHeader = response.headers.get(RetryAfterHeader$1);
+        const retryAfterHeader = response.headers.get(RetryAfterHeader);
         if (!retryAfterHeader)
             return;
         const date = Date.parse(retryAfterHeader);
@@ -30309,14 +31304,14 @@ function getRetryAfterInMs$1(response) {
  * A response is a retry response if it has a throttling status code (429 or 503),
  * as long as one of the [ "Retry-After" or "retry-after-ms" or "x-ms-retry-after-ms" ] headers has a valid value.
  */
-function isThrottlingRetryResponse$1(response) {
-    return Number.isFinite(getRetryAfterInMs$1(response));
+function isThrottlingRetryResponse(response) {
+    return Number.isFinite(getRetryAfterInMs(response));
 }
-function throttlingRetryStrategy$1() {
+function throttlingRetryStrategy() {
     return {
         name: "throttlingRetryStrategy",
         retry({ response }) {
-            const retryAfterInMs = getRetryAfterInMs$1(response);
+            const retryAfterInMs = getRetryAfterInMs(response);
             if (!Number.isFinite(retryAfterInMs)) {
                 return { skipStrategy: true };
             }
@@ -30330,31 +31325,31 @@ function throttlingRetryStrategy$1() {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 // intervals are in milliseconds
-const DEFAULT_CLIENT_RETRY_INTERVAL$1 = 1000;
-const DEFAULT_CLIENT_MAX_RETRY_INTERVAL$1 = 1000 * 64;
+const DEFAULT_CLIENT_RETRY_INTERVAL = 1000;
+const DEFAULT_CLIENT_MAX_RETRY_INTERVAL = 1000 * 64;
 /**
  * A retry strategy that retries with an exponentially increasing delay in these two cases:
  * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
  * - Or otherwise if the outgoing request fails (408, greater or equal than 500, except for 501 and 505).
  */
-function exponentialRetryStrategy$1(options = {}) {
-    const retryInterval = options.retryDelayInMs ?? DEFAULT_CLIENT_RETRY_INTERVAL$1;
-    const maxRetryInterval = options.maxRetryDelayInMs ?? DEFAULT_CLIENT_MAX_RETRY_INTERVAL$1;
+function exponentialRetryStrategy(options = {}) {
+    const retryInterval = options.retryDelayInMs ?? DEFAULT_CLIENT_RETRY_INTERVAL;
+    const maxRetryInterval = options.maxRetryDelayInMs ?? DEFAULT_CLIENT_MAX_RETRY_INTERVAL;
     return {
         name: "exponentialRetryStrategy",
         retry({ retryCount, response, responseError }) {
-            const matchedSystemError = isSystemError$1(responseError);
+            const matchedSystemError = isSystemError(responseError);
             const ignoreSystemErrors = matchedSystemError && options.ignoreSystemErrors;
-            const isExponential = isExponentialRetryResponse$1(response);
+            const isExponential = isExponentialRetryResponse(response);
             const ignoreExponentialResponse = isExponential && options.ignoreHttpStatusCodes;
-            const unknownResponse = response && (isThrottlingRetryResponse$1(response) || !isExponential);
+            const unknownResponse = response && (isThrottlingRetryResponse(response) || !isExponential);
             if (unknownResponse || ignoreExponentialResponse || ignoreSystemErrors) {
                 return { skipStrategy: true };
             }
             if (responseError && !matchedSystemError && !isExponential) {
                 return { errorToThrow: responseError };
             }
-            return calculateRetryDelay$1(retryCount, {
+            return calculateRetryDelay(retryCount, {
                 retryDelayInMs: retryInterval,
                 maxRetryDelayInMs: maxRetryInterval,
             });
@@ -30366,7 +31361,7 @@ function exponentialRetryStrategy$1(options = {}) {
  * - 408, or
  * - Greater or equal than 500, except for 501 and 505.
  */
-function isExponentialRetryResponse$1(response) {
+function isExponentialRetryResponse(response) {
     return Boolean(response &&
         response.status !== undefined &&
         (response.status >= 500 || response.status === 408) &&
@@ -30376,7 +31371,7 @@ function isExponentialRetryResponse$1(response) {
 /**
  * Determines whether an error from a pipeline response was triggered in the network layer.
  */
-function isSystemError$1(err) {
+function isSystemError(err) {
     if (!err) {
         return false;
     }
@@ -30390,25 +31385,24 @@ function isSystemError$1(err) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const retryPolicyLogger$1 = createClientLogger$3("ts-http-runtime retryPolicy");
+const retryPolicyLogger = createClientLogger$1("ts-http-runtime retryPolicy");
 /**
  * The programmatic identifier of the retryPolicy.
  */
-const retryPolicyName$1 = "retryPolicy";
+const retryPolicyName = "retryPolicy";
 /**
  * retryPolicy is a generic policy to enable retrying requests when certain conditions are met
  */
-function retryPolicy$1(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_COUNT$1 }) {
-    const logger = options.logger || retryPolicyLogger$1;
+function retryPolicy(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_COUNT }) {
+    const logger = options.logger || retryPolicyLogger;
     return {
-        name: retryPolicyName$1,
+        name: retryPolicyName,
         async sendRequest(request, next) {
             let response;
             let responseError;
             let retryCount = -1;
             retryRequest: while (true) {
                 retryCount += 1;
-                response = undefined;
                 responseError = undefined;
                 try {
                     logger.info(`Retry ${retryCount}: Attempting to send request`, request.requestId);
@@ -30420,18 +31414,18 @@ function retryPolicy$1(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_
                     // RestErrors are valid targets for the retry strategies.
                     // If none of the retry strategies can work with them, they will be thrown later in this policy.
                     // If the received error is not a RestError, it is immediately thrown.
-                    responseError = e;
-                    if (!e || responseError.name !== "RestError") {
+                    if (!isRestError$1(e)) {
                         throw e;
                     }
-                    response = responseError.response;
+                    responseError = e;
+                    response = e.response;
                 }
                 if (request.abortSignal?.aborted) {
                     logger.error(`Retry ${retryCount}: Request aborted.`);
-                    const abortError = new AbortError$2();
+                    const abortError = new AbortError();
                     throw abortError;
                 }
-                if (retryCount >= (options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT$1)) {
+                if (retryCount >= (options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT)) {
                     logger.info(`Retry ${retryCount}: Maximum retries reached. Returning the last received response, or throwing the last received error.`);
                     if (responseError) {
                         throw responseError;
@@ -30463,11 +31457,17 @@ function retryPolicy$1(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_
                     }
                     if (retryAfterInMs || retryAfterInMs === 0) {
                         strategyLogger.info(`Retry ${retryCount}: Retry strategy ${strategy.name} retries after ${retryAfterInMs}`);
-                        await delay$4(retryAfterInMs, undefined, { abortSignal: request.abortSignal });
+                        if (response) {
+                            await disposeResponseBody(response);
+                        }
+                        await delay$2(retryAfterInMs, undefined, { abortSignal: request.abortSignal });
                         continue retryRequest;
                     }
                     if (redirectTo) {
                         strategyLogger.info(`Retry ${retryCount}: Retry strategy ${strategy.name} redirects to ${redirectTo}`);
+                        if (response) {
+                            await disposeResponseBody(response);
+                        }
                         request.url = redirectTo;
                         continue retryRequest;
                     }
@@ -30493,18 +31493,18 @@ function retryPolicy$1(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_
 /**
  * Name of the {@link defaultRetryPolicy}
  */
-const defaultRetryPolicyName$1 = "defaultRetryPolicy";
+const defaultRetryPolicyName = "defaultRetryPolicy";
 /**
  * A policy that retries according to three strategies:
  * - When the server sends a 429 response with a Retry-After header.
  * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
  * - Or otherwise if the outgoing request fails, it will retry with an exponentially increasing delay.
  */
-function defaultRetryPolicy$3(options = {}) {
+function defaultRetryPolicy$1(options = {}) {
     return {
-        name: defaultRetryPolicyName$1,
-        sendRequest: retryPolicy$1([throttlingRetryStrategy$1(), exponentialRetryStrategy$1(options)], {
-            maxRetries: options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT$1,
+        name: defaultRetryPolicyName,
+        sendRequest: retryPolicy([throttlingRetryStrategy(), exponentialRetryStrategy(options)], {
+            maxRetries: options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT,
         }).sendRequest,
     };
 }
@@ -30512,35 +31512,54 @@ function defaultRetryPolicy$3(options = {}) {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
+ * If the request body is a native FormData, convert it to our FormDataMap
+ * representation and clear the body. Node.js's HTTP stack doesn't handle
+ * FormData natively, so the pipeline must serialize it later.
+ *
+ * @internal
+ */
+function convertBodyToFormDataMap(body) {
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+        const formDataMap = {};
+        for (const [key, value] of body.entries()) {
+            const existing = formDataMap[key];
+            if (Array.isArray(existing)) {
+                existing.push(value);
+            }
+            else {
+                formDataMap[key] = existing !== undefined ? [existing, value] : [value];
+            }
+        }
+        return formDataMap;
+    }
+    return undefined;
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
  * The programmatic identifier of the formDataPolicy.
  */
-const formDataPolicyName$1 = "formDataPolicy";
-function formDataToFormDataMap(formData) {
-    const formDataMap = {};
-    for (const [key, value] of formData.entries()) {
-        formDataMap[key] ??= [];
-        formDataMap[key].push(value);
-    }
-    return formDataMap;
-}
+const formDataPolicyName = "formDataPolicy";
 /**
  * A policy that encodes FormData on the request into the body.
  */
-function formDataPolicy$3() {
+function formDataPolicy$1() {
     return {
-        name: formDataPolicyName$1,
+        name: formDataPolicyName,
         async sendRequest(request, next) {
-            if (isNodeLike$3 && typeof FormData !== "undefined" && request.body instanceof FormData) {
-                request.formData = formDataToFormDataMap(request.body);
+            const converted = convertBodyToFormDataMap(request.body);
+            if (converted) {
+                request.formData = converted;
                 request.body = undefined;
             }
             if (request.formData) {
                 const contentType = request.headers.get("Content-Type");
                 if (contentType && contentType.indexOf("application/x-www-form-urlencoded") !== -1) {
-                    request.body = wwwFormUrlEncode$1(request.formData);
+                    request.body = wwwFormUrlEncode(request.formData);
                 }
                 else {
-                    await prepareFormData$1(request.formData, request);
+                    await prepareFormData(request.formData, request);
                 }
                 request.formData = undefined;
             }
@@ -30548,7 +31567,7 @@ function formDataPolicy$3() {
         },
     };
 }
-function wwwFormUrlEncode$1(formData) {
+function wwwFormUrlEncode(formData) {
     const urlSearchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(formData)) {
         if (Array.isArray(value)) {
@@ -30562,7 +31581,7 @@ function wwwFormUrlEncode$1(formData) {
     }
     return urlSearchParams.toString();
 }
-async function prepareFormData$1(formData, request) {
+async function prepareFormData(formData, request) {
     // validate content type (multipart/form-data)
     const contentType = request.headers.get("Content-Type");
     if (contentType && !contentType.startsWith("multipart/form-data")) {
@@ -30576,7 +31595,7 @@ async function prepareFormData$1(formData, request) {
         for (const value of Array.isArray(values) ? values : [values]) {
             if (typeof value === "string") {
                 parts.push({
-                    headers: createHttpHeaders$2({
+                    headers: createHttpHeaders$1({
                         "Content-Disposition": `form-data; name="${fieldName}"`,
                     }),
                     body: stringToUint8Array$1(value, "utf-8"),
@@ -30588,7 +31607,7 @@ async function prepareFormData$1(formData, request) {
             else {
                 // using || instead of ?? here since if value.name is empty we should create a file name
                 const fileName = value.name || "blob";
-                const headers = createHttpHeaders$2();
+                const headers = createHttpHeaders$1();
                 headers.set("Content-Disposition", `form-data; name="${fieldName}"; filename="${fileName}"`);
                 // again, || is used since an empty value.type means the content type is unset
                 headers.set("Content-Type", value.type || "application/octet-stream");
@@ -30602,7 +31621,49 @@ async function prepareFormData$1(formData, request) {
     request.multipartBody = { parts };
 }
 
-var dist$2 = {};
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Name of the Agent Policy
+ */
+const agentPolicyName = "agentPolicy";
+/**
+ * Gets a pipeline policy that sets http.agent
+ */
+function agentPolicy$1(agent) {
+    return {
+        name: agentPolicyName,
+        sendRequest: async (req, next) => {
+            // Users may define an agent on the request, honor it over the client level one
+            if (!req.agent) {
+                req.agent = agent;
+            }
+            return next(req);
+        },
+    };
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Name of the TLS Policy
+ */
+const tlsPolicyName = "tlsPolicy";
+/**
+ * Gets a pipeline policy that adds the client certificate to the HttpClient agent for authentication.
+ */
+function tlsPolicy$1(tlsSettings) {
+    return {
+        name: tlsPolicyName,
+        sendRequest: async (req, next) => {
+            // Users may define a request tlsSettings, honor those over the client level one
+            if (!req.tlsSettings) {
+                req.tlsSettings = tlsSettings;
+            }
+            return next(req);
+        },
+    };
+}
 
 var src = {exports: {}};
 
@@ -31363,6 +32424,161 @@ function requireBrowser () {
 
 var node = {exports: {}};
 
+var hasFlag;
+var hasRequiredHasFlag;
+
+function requireHasFlag () {
+	if (hasRequiredHasFlag) return hasFlag;
+	hasRequiredHasFlag = 1;
+	hasFlag = (flag, argv) => {
+		argv = argv || process.argv;
+		const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+		const pos = argv.indexOf(prefix + flag);
+		const terminatorPos = argv.indexOf('--');
+		return pos !== -1 && (terminatorPos === -1 ? true : pos < terminatorPos);
+	};
+	return hasFlag;
+}
+
+var supportsColor_1;
+var hasRequiredSupportsColor;
+
+function requireSupportsColor () {
+	if (hasRequiredSupportsColor) return supportsColor_1;
+	hasRequiredSupportsColor = 1;
+	const os = os__default;
+	const hasFlag = requireHasFlag();
+
+	const env = process.env;
+
+	let forceColor;
+	if (hasFlag('no-color') ||
+		hasFlag('no-colors') ||
+		hasFlag('color=false')) {
+		forceColor = false;
+	} else if (hasFlag('color') ||
+		hasFlag('colors') ||
+		hasFlag('color=true') ||
+		hasFlag('color=always')) {
+		forceColor = true;
+	}
+	if ('FORCE_COLOR' in env) {
+		forceColor = env.FORCE_COLOR.length === 0 || parseInt(env.FORCE_COLOR, 10) !== 0;
+	}
+
+	function translateLevel(level) {
+		if (level === 0) {
+			return false;
+		}
+
+		return {
+			level,
+			hasBasic: true,
+			has256: level >= 2,
+			has16m: level >= 3
+		};
+	}
+
+	function supportsColor(stream) {
+		if (forceColor === false) {
+			return 0;
+		}
+
+		if (hasFlag('color=16m') ||
+			hasFlag('color=full') ||
+			hasFlag('color=truecolor')) {
+			return 3;
+		}
+
+		if (hasFlag('color=256')) {
+			return 2;
+		}
+
+		if (stream && !stream.isTTY && forceColor !== true) {
+			return 0;
+		}
+
+		const min = forceColor ? 1 : 0;
+
+		if (process.platform === 'win32') {
+			// Node.js 7.5.0 is the first version of Node.js to include a patch to
+			// libuv that enables 256 color output on Windows. Anything earlier and it
+			// won't work. However, here we target Node.js 8 at minimum as it is an LTS
+			// release, and Node.js 7 is not. Windows 10 build 10586 is the first Windows
+			// release that supports 256 colors. Windows 10 build 14931 is the first release
+			// that supports 16m/TrueColor.
+			const osRelease = os.release().split('.');
+			if (
+				Number(process.versions.node.split('.')[0]) >= 8 &&
+				Number(osRelease[0]) >= 10 &&
+				Number(osRelease[2]) >= 10586
+			) {
+				return Number(osRelease[2]) >= 14931 ? 3 : 2;
+			}
+
+			return 1;
+		}
+
+		if ('CI' in env) {
+			if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+				return 1;
+			}
+
+			return min;
+		}
+
+		if ('TEAMCITY_VERSION' in env) {
+			return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+		}
+
+		if (env.COLORTERM === 'truecolor') {
+			return 3;
+		}
+
+		if ('TERM_PROGRAM' in env) {
+			const version = parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+			switch (env.TERM_PROGRAM) {
+				case 'iTerm.app':
+					return version >= 3 ? 3 : 2;
+				case 'Apple_Terminal':
+					return 2;
+				// No default
+			}
+		}
+
+		if (/-256(color)?$/i.test(env.TERM)) {
+			return 2;
+		}
+
+		if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+			return 1;
+		}
+
+		if ('COLORTERM' in env) {
+			return 1;
+		}
+
+		if (env.TERM === 'dumb') {
+			return min;
+		}
+
+		return min;
+	}
+
+	function getSupportLevel(stream) {
+		const level = supportsColor(stream);
+		return translateLevel(level);
+	}
+
+	supportsColor_1 = {
+		supportsColor: getSupportLevel,
+		stdout: getSupportLevel(process.stdout),
+		stderr: getSupportLevel(process.stderr)
+	};
+	return supportsColor_1;
+}
+
 /**
  * Module dependencies.
  */
@@ -31400,7 +32616,7 @@ function requireNode () {
 		try {
 			// Optional dependency (as in, doesn't need to be installed, NOT like optionalDependencies in package.json)
 			// eslint-disable-next-line import/no-extraneous-dependencies
-			const supportsColor = require('supports-color');
+			const supportsColor = requireSupportsColor();
 
 			if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
 				exports.colors = [
@@ -31654,747 +32870,649 @@ function requireSrc () {
 	return src.exports;
 }
 
-var dist$1 = {};
+var srcExports = requireSrc();
+var createDebug = /*@__PURE__*/getDefaultExportFromCjs(srcExports);
 
-var helpers = {};
-
-var hasRequiredHelpers;
-
-function requireHelpers () {
-	if (hasRequiredHelpers) return helpers;
-	hasRequiredHelpers = 1;
-	var __createBinding = (helpers && helpers.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    var desc = Object.getOwnPropertyDescriptor(m, k);
-	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-	      desc = { enumerable: true, get: function() { return m[k]; } };
-	    }
-	    Object.defineProperty(o, k2, desc);
-	}) : (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    o[k2] = m[k];
-	}));
-	var __setModuleDefault = (helpers && helpers.__setModuleDefault) || (Object.create ? (function(o, v) {
-	    Object.defineProperty(o, "default", { enumerable: true, value: v });
-	}) : function(o, v) {
-	    o["default"] = v;
-	});
-	var __importStar = (helpers && helpers.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
-	Object.defineProperty(helpers, "__esModule", { value: true });
-	helpers.req = helpers.json = helpers.toBuffer = void 0;
-	const http$1 = __importStar(http);
-	const https$1 = __importStar(https);
-	async function toBuffer(stream) {
-	    let length = 0;
-	    const chunks = [];
-	    for await (const chunk of stream) {
-	        length += chunk.length;
-	        chunks.push(chunk);
-	    }
-	    return Buffer.concat(chunks, length);
-	}
-	helpers.toBuffer = toBuffer;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	async function json(stream) {
-	    const buf = await toBuffer(stream);
-	    const str = buf.toString('utf8');
-	    try {
-	        return JSON.parse(str);
-	    }
-	    catch (_err) {
-	        const err = _err;
-	        err.message += ` (input: ${str})`;
-	        throw err;
-	    }
-	}
-	helpers.json = json;
-	function req(url, opts = {}) {
-	    const href = typeof url === 'string' ? url : url.href;
-	    const req = (href.startsWith('https:') ? https$1 : http$1).request(url, opts);
-	    const promise = new Promise((resolve, reject) => {
-	        req
-	            .once('response', resolve)
-	            .once('error', reject)
-	            .end();
-	    });
-	    req.then = promise.then.bind(promise);
-	    return req;
-	}
-	helpers.req = req;
-	
-	return helpers;
+const INTERNAL = Symbol('AgentBaseInternalState');
+class Agent extends http.Agent {
+    constructor(opts) {
+        super(opts);
+        this[INTERNAL] = {};
+    }
+    /**
+     * Determine whether this is an `http` or `https` request.
+     */
+    isSecureEndpoint(options) {
+        if (options) {
+            // First check the `secureEndpoint` property explicitly, since this
+            // means that a parent `Agent` is "passing through" to this instance.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (typeof options.secureEndpoint === 'boolean') {
+                return options.secureEndpoint;
+            }
+            // If no explicit `secure` endpoint, check if `protocol` property is
+            // set. This will usually be the case since using a full string URL
+            // or `URL` instance should be the most common usage.
+            if (typeof options.protocol === 'string') {
+                return options.protocol === 'https:';
+            }
+        }
+        // Finally, if no `protocol` property was set, then fall back to
+        // checking the stack trace of the current call stack, and try to
+        // detect the "https" module.
+        const { stack } = new Error();
+        if (typeof stack !== 'string')
+            return false;
+        return stack
+            .split('\n')
+            .some((l) => l.indexOf('(https.js:') !== -1 ||
+            l.indexOf('node:https:') !== -1);
+    }
+    // In order to support async signatures in `connect()` and Node's native
+    // connection pooling in `http.Agent`, the array of sockets for each origin
+    // has to be updated synchronously. This is so the length of the array is
+    // accurate when `addRequest()` is next called. We achieve this by creating a
+    // fake socket and adding it to `sockets[origin]` and incrementing
+    // `totalSocketCount`.
+    incrementSockets(name) {
+        // If `maxSockets` and `maxTotalSockets` are both Infinity then there is no
+        // need to create a fake socket because Node.js native connection pooling
+        // will never be invoked.
+        if (this.maxSockets === Infinity && this.maxTotalSockets === Infinity) {
+            return null;
+        }
+        // All instances of `sockets` are expected TypeScript errors. The
+        // alternative is to add it as a private property of this class but that
+        // will break TypeScript subclassing.
+        if (!this.sockets[name]) {
+            // @ts-expect-error `sockets` is readonly in `@types/node`
+            this.sockets[name] = [];
+        }
+        const fakeSocket = new net.Socket({ writable: false });
+        this.sockets[name].push(fakeSocket);
+        // @ts-expect-error `totalSocketCount` isn't defined in `@types/node`
+        this.totalSocketCount++;
+        return fakeSocket;
+    }
+    decrementSockets(name, socket) {
+        if (!this.sockets[name] || socket === null) {
+            return;
+        }
+        const sockets = this.sockets[name];
+        const index = sockets.indexOf(socket);
+        if (index !== -1) {
+            sockets.splice(index, 1);
+            // @ts-expect-error  `totalSocketCount` isn't defined in `@types/node`
+            this.totalSocketCount--;
+            if (sockets.length === 0) {
+                // @ts-expect-error `sockets` is readonly in `@types/node`
+                delete this.sockets[name];
+            }
+        }
+    }
+    // In order to properly update the socket pool, we need to call `getName()` on
+    // the core `https.Agent` if it is a secureEndpoint.
+    getName(options) {
+        const secureEndpoint = this.isSecureEndpoint(options);
+        if (secureEndpoint) {
+            return Agent$1.prototype.getName.call(this, options);
+        }
+        return super.getName(options);
+    }
+    createSocket(req, options, cb) {
+        const connectOpts = {
+            ...options,
+            secureEndpoint: this.isSecureEndpoint(options),
+        };
+        const name = this.getName(connectOpts);
+        const fakeSocket = this.incrementSockets(name);
+        Promise.resolve()
+            .then(() => this.connect(req, connectOpts))
+            .then((socket) => {
+            this.decrementSockets(name, fakeSocket);
+            if (typeof socket
+                .addRequest === 'function') {
+                try {
+                    return socket.addRequest(req, connectOpts);
+                }
+                catch (err) {
+                    return cb(err);
+                }
+            }
+            this[INTERNAL].currentSocket = socket;
+            // @ts-expect-error `createSocket()` isn't defined in `@types/node`
+            super.createSocket(req, options, cb);
+        }, (err) => {
+            this.decrementSockets(name, fakeSocket);
+            cb(err);
+        });
+    }
+    createConnection() {
+        const socket = this[INTERNAL].currentSocket;
+        this[INTERNAL].currentSocket = undefined;
+        if (!socket) {
+            throw new Error('No socket was returned in the `connect()` function');
+        }
+        return socket;
+    }
+    get defaultPort() {
+        return (this[INTERNAL].defaultPort ??
+            (this.protocol === 'https:' ? 443 : 80));
+    }
+    set defaultPort(v) {
+        if (this[INTERNAL]) {
+            this[INTERNAL].defaultPort = v;
+        }
+    }
+    get protocol() {
+        return (this[INTERNAL].protocol ??
+            (this.isSecureEndpoint() ? 'https:' : 'http:'));
+    }
+    set protocol(v) {
+        if (this[INTERNAL]) {
+            this[INTERNAL].protocol = v;
+        }
+    }
 }
 
-var hasRequiredDist$2;
-
-function requireDist$2 () {
-	if (hasRequiredDist$2) return dist$1;
-	hasRequiredDist$2 = 1;
-	(function (exports) {
-		var __createBinding = (dist$1 && dist$1.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-		    if (k2 === undefined) k2 = k;
-		    var desc = Object.getOwnPropertyDescriptor(m, k);
-		    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-		      desc = { enumerable: true, get: function() { return m[k]; } };
-		    }
-		    Object.defineProperty(o, k2, desc);
-		}) : (function(o, m, k, k2) {
-		    if (k2 === undefined) k2 = k;
-		    o[k2] = m[k];
-		}));
-		var __setModuleDefault = (dist$1 && dist$1.__setModuleDefault) || (Object.create ? (function(o, v) {
-		    Object.defineProperty(o, "default", { enumerable: true, value: v });
-		}) : function(o, v) {
-		    o["default"] = v;
-		});
-		var __importStar = (dist$1 && dist$1.__importStar) || function (mod) {
-		    if (mod && mod.__esModule) return mod;
-		    var result = {};
-		    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-		    __setModuleDefault(result, mod);
-		    return result;
-		};
-		var __exportStar = (dist$1 && dist$1.__exportStar) || function(m, exports) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
-		};
-		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.Agent = void 0;
-		const net = __importStar(require$$0$7);
-		const http$1 = __importStar(http);
-		const https_1 = https;
-		__exportStar(requireHelpers(), exports);
-		const INTERNAL = Symbol('AgentBaseInternalState');
-		class Agent extends http$1.Agent {
-		    constructor(opts) {
-		        super(opts);
-		        this[INTERNAL] = {};
-		    }
-		    /**
-		     * Determine whether this is an `http` or `https` request.
-		     */
-		    isSecureEndpoint(options) {
-		        if (options) {
-		            // First check the `secureEndpoint` property explicitly, since this
-		            // means that a parent `Agent` is "passing through" to this instance.
-		            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-		            if (typeof options.secureEndpoint === 'boolean') {
-		                return options.secureEndpoint;
-		            }
-		            // If no explicit `secure` endpoint, check if `protocol` property is
-		            // set. This will usually be the case since using a full string URL
-		            // or `URL` instance should be the most common usage.
-		            if (typeof options.protocol === 'string') {
-		                return options.protocol === 'https:';
-		            }
-		        }
-		        // Finally, if no `protocol` property was set, then fall back to
-		        // checking the stack trace of the current call stack, and try to
-		        // detect the "https" module.
-		        const { stack } = new Error();
-		        if (typeof stack !== 'string')
-		            return false;
-		        return stack
-		            .split('\n')
-		            .some((l) => l.indexOf('(https.js:') !== -1 ||
-		            l.indexOf('node:https:') !== -1);
-		    }
-		    // In order to support async signatures in `connect()` and Node's native
-		    // connection pooling in `http.Agent`, the array of sockets for each origin
-		    // has to be updated synchronously. This is so the length of the array is
-		    // accurate when `addRequest()` is next called. We achieve this by creating a
-		    // fake socket and adding it to `sockets[origin]` and incrementing
-		    // `totalSocketCount`.
-		    incrementSockets(name) {
-		        // If `maxSockets` and `maxTotalSockets` are both Infinity then there is no
-		        // need to create a fake socket because Node.js native connection pooling
-		        // will never be invoked.
-		        if (this.maxSockets === Infinity && this.maxTotalSockets === Infinity) {
-		            return null;
-		        }
-		        // All instances of `sockets` are expected TypeScript errors. The
-		        // alternative is to add it as a private property of this class but that
-		        // will break TypeScript subclassing.
-		        if (!this.sockets[name]) {
-		            // @ts-expect-error `sockets` is readonly in `@types/node`
-		            this.sockets[name] = [];
-		        }
-		        const fakeSocket = new net.Socket({ writable: false });
-		        this.sockets[name].push(fakeSocket);
-		        // @ts-expect-error `totalSocketCount` isn't defined in `@types/node`
-		        this.totalSocketCount++;
-		        return fakeSocket;
-		    }
-		    decrementSockets(name, socket) {
-		        if (!this.sockets[name] || socket === null) {
-		            return;
-		        }
-		        const sockets = this.sockets[name];
-		        const index = sockets.indexOf(socket);
-		        if (index !== -1) {
-		            sockets.splice(index, 1);
-		            // @ts-expect-error  `totalSocketCount` isn't defined in `@types/node`
-		            this.totalSocketCount--;
-		            if (sockets.length === 0) {
-		                // @ts-expect-error `sockets` is readonly in `@types/node`
-		                delete this.sockets[name];
-		            }
-		        }
-		    }
-		    // In order to properly update the socket pool, we need to call `getName()` on
-		    // the core `https.Agent` if it is a secureEndpoint.
-		    getName(options) {
-		        const secureEndpoint = this.isSecureEndpoint(options);
-		        if (secureEndpoint) {
-		            // @ts-expect-error `getName()` isn't defined in `@types/node`
-		            return https_1.Agent.prototype.getName.call(this, options);
-		        }
-		        // @ts-expect-error `getName()` isn't defined in `@types/node`
-		        return super.getName(options);
-		    }
-		    createSocket(req, options, cb) {
-		        const connectOpts = {
-		            ...options,
-		            secureEndpoint: this.isSecureEndpoint(options),
-		        };
-		        const name = this.getName(connectOpts);
-		        const fakeSocket = this.incrementSockets(name);
-		        Promise.resolve()
-		            .then(() => this.connect(req, connectOpts))
-		            .then((socket) => {
-		            this.decrementSockets(name, fakeSocket);
-		            if (socket instanceof http$1.Agent) {
-		                try {
-		                    // @ts-expect-error `addRequest()` isn't defined in `@types/node`
-		                    return socket.addRequest(req, connectOpts);
-		                }
-		                catch (err) {
-		                    return cb(err);
-		                }
-		            }
-		            this[INTERNAL].currentSocket = socket;
-		            // @ts-expect-error `createSocket()` isn't defined in `@types/node`
-		            super.createSocket(req, options, cb);
-		        }, (err) => {
-		            this.decrementSockets(name, fakeSocket);
-		            cb(err);
-		        });
-		    }
-		    createConnection() {
-		        const socket = this[INTERNAL].currentSocket;
-		        this[INTERNAL].currentSocket = undefined;
-		        if (!socket) {
-		            throw new Error('No socket was returned in the `connect()` function');
-		        }
-		        return socket;
-		    }
-		    get defaultPort() {
-		        return (this[INTERNAL].defaultPort ??
-		            (this.protocol === 'https:' ? 443 : 80));
-		    }
-		    set defaultPort(v) {
-		        if (this[INTERNAL]) {
-		            this[INTERNAL].defaultPort = v;
-		        }
-		    }
-		    get protocol() {
-		        return (this[INTERNAL].protocol ??
-		            (this.isSecureEndpoint() ? 'https:' : 'http:'));
-		    }
-		    set protocol(v) {
-		        if (this[INTERNAL]) {
-		            this[INTERNAL].protocol = v;
-		        }
-		    }
-		}
-		exports.Agent = Agent;
-		
-	} (dist$1));
-	return dist$1;
+const debug$2 = createDebug('https-proxy-agent:parse-proxy-response');
+function parseProxyResponse(socket) {
+    return new Promise((resolve, reject) => {
+        // we need to buffer any HTTP traffic that happens with the proxy before we get
+        // the CONNECT response, so that if the response is anything other than an "200"
+        // response code, then we can re-play the "data" events on the socket once the
+        // HTTP parser is hooked up...
+        let buffersLength = 0;
+        const buffers = [];
+        function read() {
+            const b = socket.read();
+            if (b)
+                ondata(b);
+            else
+                socket.once('readable', read);
+        }
+        function cleanup() {
+            socket.removeListener('end', onend);
+            socket.removeListener('error', onerror);
+            socket.removeListener('readable', read);
+        }
+        function onend() {
+            cleanup();
+            debug$2('onend');
+            reject(new Error('Proxy connection ended before receiving CONNECT response'));
+        }
+        function onerror(err) {
+            cleanup();
+            debug$2('onerror %o', err);
+            reject(err);
+        }
+        function ondata(b) {
+            buffers.push(b);
+            buffersLength += b.length;
+            const buffered = Buffer.concat(buffers, buffersLength);
+            const endOfHeaders = buffered.indexOf('\r\n\r\n');
+            if (endOfHeaders === -1) {
+                // keep buffering
+                debug$2('have not received end of HTTP headers yet...');
+                read();
+                return;
+            }
+            const headerParts = buffered
+                .slice(0, endOfHeaders)
+                .toString('ascii')
+                .split('\r\n');
+            const firstLine = headerParts.shift();
+            if (!firstLine) {
+                socket.destroy();
+                return reject(new Error('No header received from proxy CONNECT response'));
+            }
+            const firstLineParts = firstLine.split(' ');
+            const statusCode = +firstLineParts[1];
+            const statusText = firstLineParts.slice(2).join(' ');
+            const headers = {};
+            for (const header of headerParts) {
+                if (!header)
+                    continue;
+                const firstColon = header.indexOf(':');
+                if (firstColon === -1) {
+                    socket.destroy();
+                    return reject(new Error(`Invalid header from proxy CONNECT response: "${header}"`));
+                }
+                const key = header.slice(0, firstColon).toLowerCase();
+                const value = header.slice(firstColon + 1).trimStart();
+                const current = headers[key];
+                if (typeof current === 'string') {
+                    headers[key] = [current, value];
+                }
+                else if (Array.isArray(current)) {
+                    current.push(value);
+                }
+                else {
+                    headers[key] = value;
+                }
+            }
+            debug$2('got proxy server response: %o %o', firstLine, headers);
+            cleanup();
+            resolve({
+                connect: {
+                    statusCode,
+                    statusText,
+                    headers,
+                },
+                buffered,
+            });
+        }
+        socket.on('error', onerror);
+        socket.on('end', onend);
+        read();
+    });
 }
 
-var parseProxyResponse = {};
-
-var hasRequiredParseProxyResponse;
-
-function requireParseProxyResponse () {
-	if (hasRequiredParseProxyResponse) return parseProxyResponse;
-	hasRequiredParseProxyResponse = 1;
-	var __importDefault = (parseProxyResponse && parseProxyResponse.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(parseProxyResponse, "__esModule", { value: true });
-	parseProxyResponse.parseProxyResponse = void 0;
-	const debug_1 = __importDefault(requireSrc());
-	const debug = (0, debug_1.default)('https-proxy-agent:parse-proxy-response');
-	function parseProxyResponse$1(socket) {
-	    return new Promise((resolve, reject) => {
-	        // we need to buffer any HTTP traffic that happens with the proxy before we get
-	        // the CONNECT response, so that if the response is anything other than an "200"
-	        // response code, then we can re-play the "data" events on the socket once the
-	        // HTTP parser is hooked up...
-	        let buffersLength = 0;
-	        const buffers = [];
-	        function read() {
-	            const b = socket.read();
-	            if (b)
-	                ondata(b);
-	            else
-	                socket.once('readable', read);
-	        }
-	        function cleanup() {
-	            socket.removeListener('end', onend);
-	            socket.removeListener('error', onerror);
-	            socket.removeListener('readable', read);
-	        }
-	        function onend() {
-	            cleanup();
-	            debug('onend');
-	            reject(new Error('Proxy connection ended before receiving CONNECT response'));
-	        }
-	        function onerror(err) {
-	            cleanup();
-	            debug('onerror %o', err);
-	            reject(err);
-	        }
-	        function ondata(b) {
-	            buffers.push(b);
-	            buffersLength += b.length;
-	            const buffered = Buffer.concat(buffers, buffersLength);
-	            const endOfHeaders = buffered.indexOf('\r\n\r\n');
-	            if (endOfHeaders === -1) {
-	                // keep buffering
-	                debug('have not received end of HTTP headers yet...');
-	                read();
-	                return;
-	            }
-	            const headerParts = buffered
-	                .slice(0, endOfHeaders)
-	                .toString('ascii')
-	                .split('\r\n');
-	            const firstLine = headerParts.shift();
-	            if (!firstLine) {
-	                socket.destroy();
-	                return reject(new Error('No header received from proxy CONNECT response'));
-	            }
-	            const firstLineParts = firstLine.split(' ');
-	            const statusCode = +firstLineParts[1];
-	            const statusText = firstLineParts.slice(2).join(' ');
-	            const headers = {};
-	            for (const header of headerParts) {
-	                if (!header)
-	                    continue;
-	                const firstColon = header.indexOf(':');
-	                if (firstColon === -1) {
-	                    socket.destroy();
-	                    return reject(new Error(`Invalid header from proxy CONNECT response: "${header}"`));
-	                }
-	                const key = header.slice(0, firstColon).toLowerCase();
-	                const value = header.slice(firstColon + 1).trimStart();
-	                const current = headers[key];
-	                if (typeof current === 'string') {
-	                    headers[key] = [current, value];
-	                }
-	                else if (Array.isArray(current)) {
-	                    current.push(value);
-	                }
-	                else {
-	                    headers[key] = value;
-	                }
-	            }
-	            debug('got proxy server response: %o %o', firstLine, headers);
-	            cleanup();
-	            resolve({
-	                connect: {
-	                    statusCode,
-	                    statusText,
-	                    headers,
-	                },
-	                buffered,
-	            });
-	        }
-	        socket.on('error', onerror);
-	        socket.on('end', onend);
-	        read();
-	    });
-	}
-	parseProxyResponse.parseProxyResponse = parseProxyResponse$1;
-	
-	return parseProxyResponse;
+function createNegotiateAuth() {
+    return async ({ response, scheme }) => {
+        if (scheme.toLowerCase() !== 'negotiate') {
+            throw new Error(`Expected Negotiate scheme but got "${scheme}"`);
+        }
+        let kerberos;
+        try {
+            kerberos = await import('kerberos');
+        }
+        catch {
+            throw new Error('The "kerberos" package is required for Negotiate proxy authentication. ' +
+                'Install it with: npm install kerberos');
+        }
+        const proxyAuthenticate = response.headers['proxy-authenticate'] || '';
+        const challengeHeader = Array.isArray(proxyAuthenticate)
+            ? proxyAuthenticate[0]
+            : proxyAuthenticate;
+        const serverToken = typeof challengeHeader === 'string' && challengeHeader.includes(' ')
+            ? challengeHeader.split(' ').slice(1).join(' ')
+            : undefined;
+        const client = await kerberos.initializeClient('HTTP@proxy', {
+            mechOID: kerberos.GSS_MECH_OID_SPNEGO,
+        });
+        const token = await client.step(serverToken || '');
+        if (!token) {
+            throw new Error('Kerberos client.step() returned no token');
+        }
+        return {
+            headers: {
+                'Proxy-Authorization': `Negotiate ${token}`,
+            },
+        };
+    };
 }
 
-var hasRequiredDist$1;
-
-function requireDist$1 () {
-	if (hasRequiredDist$1) return dist$2;
-	hasRequiredDist$1 = 1;
-	var __createBinding = (dist$2 && dist$2.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    var desc = Object.getOwnPropertyDescriptor(m, k);
-	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-	      desc = { enumerable: true, get: function() { return m[k]; } };
-	    }
-	    Object.defineProperty(o, k2, desc);
-	}) : (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    o[k2] = m[k];
-	}));
-	var __setModuleDefault = (dist$2 && dist$2.__setModuleDefault) || (Object.create ? (function(o, v) {
-	    Object.defineProperty(o, "default", { enumerable: true, value: v });
-	}) : function(o, v) {
-	    o["default"] = v;
-	});
-	var __importStar = (dist$2 && dist$2.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
-	var __importDefault = (dist$2 && dist$2.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(dist$2, "__esModule", { value: true });
-	dist$2.HttpsProxyAgent = void 0;
-	const net = __importStar(require$$0$7);
-	const tls = __importStar(require$$1);
-	const assert_1 = __importDefault(require$$5$5);
-	const debug_1 = __importDefault(requireSrc());
-	const agent_base_1 = requireDist$2();
-	const url_1 = require$$5$6;
-	const parse_proxy_response_1 = requireParseProxyResponse();
-	const debug = (0, debug_1.default)('https-proxy-agent');
-	const setServernameFromNonIpHost = (options) => {
-	    if (options.servername === undefined &&
-	        options.host &&
-	        !net.isIP(options.host)) {
-	        return {
-	            ...options,
-	            servername: options.host,
-	        };
-	    }
-	    return options;
-	};
-	/**
-	 * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
-	 * the specified "HTTP(s) proxy server" in order to proxy HTTPS requests.
-	 *
-	 * Outgoing HTTP requests are first tunneled through the proxy server using the
-	 * `CONNECT` HTTP request method to establish a connection to the proxy server,
-	 * and then the proxy server connects to the destination target and issues the
-	 * HTTP request from the proxy server.
-	 *
-	 * `https:` requests have their socket connection upgraded to TLS once
-	 * the connection to the proxy server has been established.
-	 */
-	class HttpsProxyAgent extends agent_base_1.Agent {
-	    constructor(proxy, opts) {
-	        super(opts);
-	        this.options = { path: undefined };
-	        this.proxy = typeof proxy === 'string' ? new url_1.URL(proxy) : proxy;
-	        this.proxyHeaders = opts?.headers ?? {};
-	        debug('Creating new HttpsProxyAgent instance: %o', this.proxy.href);
-	        // Trim off the brackets from IPv6 addresses
-	        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
-	        const port = this.proxy.port
-	            ? parseInt(this.proxy.port, 10)
-	            : this.proxy.protocol === 'https:'
-	                ? 443
-	                : 80;
-	        this.connectOpts = {
-	            // Attempt to negotiate http/1.1 for proxy servers that support http/2
-	            ALPNProtocols: ['http/1.1'],
-	            ...(opts ? omit(opts, 'headers') : null),
-	            host,
-	            port,
-	        };
-	    }
-	    /**
-	     * Called when the node-core HTTP client library is creating a
-	     * new HTTP request.
-	     */
-	    async connect(req, opts) {
-	        const { proxy } = this;
-	        if (!opts.host) {
-	            throw new TypeError('No "host" provided');
-	        }
-	        // Create a socket connection to the proxy server.
-	        let socket;
-	        if (proxy.protocol === 'https:') {
-	            debug('Creating `tls.Socket`: %o', this.connectOpts);
-	            socket = tls.connect(setServernameFromNonIpHost(this.connectOpts));
-	        }
-	        else {
-	            debug('Creating `net.Socket`: %o', this.connectOpts);
-	            socket = net.connect(this.connectOpts);
-	        }
-	        const headers = typeof this.proxyHeaders === 'function'
-	            ? this.proxyHeaders()
-	            : { ...this.proxyHeaders };
-	        const host = net.isIPv6(opts.host) ? `[${opts.host}]` : opts.host;
-	        let payload = `CONNECT ${host}:${opts.port} HTTP/1.1\r\n`;
-	        // Inject the `Proxy-Authorization` header if necessary.
-	        if (proxy.username || proxy.password) {
-	            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
-	            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
-	        }
-	        headers.Host = `${host}:${opts.port}`;
-	        if (!headers['Proxy-Connection']) {
-	            headers['Proxy-Connection'] = this.keepAlive
-	                ? 'Keep-Alive'
-	                : 'close';
-	        }
-	        for (const name of Object.keys(headers)) {
-	            payload += `${name}: ${headers[name]}\r\n`;
-	        }
-	        const proxyResponsePromise = (0, parse_proxy_response_1.parseProxyResponse)(socket);
-	        socket.write(`${payload}\r\n`);
-	        const { connect, buffered } = await proxyResponsePromise;
-	        req.emit('proxyConnect', connect);
-	        this.emit('proxyConnect', connect, req);
-	        if (connect.statusCode === 200) {
-	            req.once('socket', resume);
-	            if (opts.secureEndpoint) {
-	                // The proxy is connecting to a TLS server, so upgrade
-	                // this socket connection to a TLS connection.
-	                debug('Upgrading socket connection to TLS');
-	                return tls.connect({
-	                    ...omit(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
-	                    socket,
-	                });
-	            }
-	            return socket;
-	        }
-	        // Some other status code that's not 200... need to re-play the HTTP
-	        // header "data" events onto the socket once the HTTP machinery is
-	        // attached so that the node core `http` can parse and handle the
-	        // error status code.
-	        // Close the original socket, and a new "fake" socket is returned
-	        // instead, so that the proxy doesn't get the HTTP request
-	        // written to it (which may contain `Authorization` headers or other
-	        // sensitive data).
-	        //
-	        // See: https://hackerone.com/reports/541502
-	        socket.destroy();
-	        const fakeSocket = new net.Socket({ writable: false });
-	        fakeSocket.readable = true;
-	        // Need to wait for the "socket" event to re-play the "data" events.
-	        req.once('socket', (s) => {
-	            debug('Replaying proxy buffer for failed request');
-	            (0, assert_1.default)(s.listenerCount('data') > 0);
-	            // Replay the "buffered" Buffer onto the fake `socket`, since at
-	            // this point the HTTP module machinery has been hooked up for
-	            // the user.
-	            s.push(buffered);
-	            s.push(null);
-	        });
-	        return fakeSocket;
-	    }
-	}
-	HttpsProxyAgent.protocols = ['http', 'https'];
-	dist$2.HttpsProxyAgent = HttpsProxyAgent;
-	function resume(socket) {
-	    socket.resume();
-	}
-	function omit(obj, ...keys) {
-	    const ret = {};
-	    let key;
-	    for (key in obj) {
-	        if (!keys.includes(key)) {
-	            ret[key] = obj[key];
-	        }
-	    }
-	    return ret;
-	}
-	
-	return dist$2;
+const debug$1 = createDebug('https-proxy-agent');
+const setServernameFromNonIpHost = (options) => {
+    if (options.servername === undefined &&
+        options.host &&
+        !net.isIP(options.host)) {
+        return {
+            ...options,
+            servername: options.host,
+        };
+    }
+    return options;
+};
+/**
+ * The `HttpsProxyAgent` implements an HTTP Agent subclass that connects to
+ * the specified "HTTP(s) proxy server" in order to proxy HTTPS requests.
+ *
+ * Outgoing HTTP requests are first tunneled through the proxy server using the
+ * `CONNECT` HTTP request method to establish a connection to the proxy server,
+ * and then the proxy server connects to the destination target and issues the
+ * HTTP request from the proxy server.
+ *
+ * `https:` requests have their socket connection upgraded to TLS once
+ * the connection to the proxy server has been established.
+ */
+class HttpsProxyAgent extends Agent {
+    constructor(proxy, opts) {
+        super(opts);
+        this.options = { path: undefined };
+        this.proxy = typeof proxy === 'string' ? new URL$1(proxy) : proxy;
+        this.proxyHeaders = opts?.headers ?? {};
+        debug$1('Creating new HttpsProxyAgent instance: %o', this.proxy.href);
+        if (opts?.negotiate) {
+            this.onProxyAuth = createNegotiateAuth();
+        }
+        else if (opts?.onProxyAuth) {
+            this.onProxyAuth = opts.onProxyAuth;
+        }
+        // Trim off the brackets from IPv6 addresses
+        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
+        const port = this.proxy.port
+            ? parseInt(this.proxy.port, 10)
+            : this.proxy.protocol === 'https:'
+                ? 443
+                : 80;
+        this.connectOpts = {
+            // Attempt to negotiate http/1.1 for proxy servers that support http/2
+            ALPNProtocols: ['http/1.1'],
+            ...(opts
+                ? omit$1(opts, 'headers', 'onProxyAuth', 'negotiate')
+                : null),
+            host,
+            port,
+        };
+    }
+    /**
+     * Called when the node-core HTTP client library is creating a
+     * new HTTP request.
+     */
+    async connect(req, opts) {
+        const { proxy } = this;
+        if (!opts.host) {
+            throw new TypeError('No "host" provided');
+        }
+        // Create a socket connection to the proxy server.
+        let socket;
+        if (proxy.protocol === 'https:') {
+            debug$1('Creating `tls.Socket`: %o', this.connectOpts);
+            socket = tls.connect(setServernameFromNonIpHost(this.connectOpts));
+        }
+        else {
+            debug$1('Creating `net.Socket`: %o', this.connectOpts);
+            socket = net.connect(this.connectOpts);
+        }
+        const headers = typeof this.proxyHeaders === 'function'
+            ? this.proxyHeaders()
+            : { ...this.proxyHeaders };
+        const host = net.isIPv6(opts.host) ? `[${opts.host}]` : opts.host;
+        let payload = `CONNECT ${host}:${opts.port} HTTP/1.1\r\n`;
+        // Inject the `Proxy-Authorization` header if necessary.
+        if (proxy.username || proxy.password) {
+            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
+        }
+        headers.Host = `${host}:${opts.port}`;
+        if (!headers['Proxy-Connection']) {
+            headers['Proxy-Connection'] = this.keepAlive
+                ? 'Keep-Alive'
+                : 'close';
+        }
+        for (const name of Object.keys(headers)) {
+            payload += `${name}: ${headers[name]}\r\n`;
+        }
+        const proxyResponsePromise = parseProxyResponse(socket);
+        socket.write(`${payload}\r\n`);
+        const { connect, buffered } = await proxyResponsePromise;
+        req.emit('proxyConnect', connect);
+        this.emit('proxyConnect', connect, req);
+        req.emit('proxy', { proxy: this.proxy.href, socket });
+        if (connect.statusCode === 200) {
+            req.once('socket', resume);
+            if (opts.secureEndpoint) {
+                // The proxy is connecting to a TLS server, so upgrade
+                // this socket connection to a TLS connection.
+                debug$1('Upgrading socket connection to TLS');
+                return tls.connect({
+                    ...omit$1(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
+                    socket,
+                });
+            }
+            return socket;
+        }
+        // Handle 407 Proxy Authentication Required
+        if (connect.statusCode === 407 && this.onProxyAuth) {
+            debug$1('Got 407 response, invoking onProxyAuth callback');
+            socket.destroy();
+            const proxyAuthenticate = connect.headers['proxy-authenticate'] || '';
+            const scheme = Array.isArray(proxyAuthenticate)
+                ? proxyAuthenticate[0].split(/\s/)[0]
+                : proxyAuthenticate.split(/\s/)[0];
+            const authResponse = await this.onProxyAuth({
+                response: connect,
+                scheme,
+            });
+            // Retry with the auth headers
+            return this._connectWithAuth(req, opts, authResponse.headers);
+        }
+        // Some other status code that's not 200... need to re-play the HTTP
+        // header "data" events onto the socket once the HTTP machinery is
+        // attached so that the node core `http` can parse and handle the
+        // error status code.
+        // Close the original socket, and a new "fake" socket is returned
+        // instead, so that the proxy doesn't get the HTTP request
+        // written to it (which may contain `Authorization` headers or other
+        // sensitive data).
+        //
+        // See: https://hackerone.com/reports/541502
+        socket.destroy();
+        const fakeSocket = new net.Socket({ writable: false });
+        fakeSocket.readable = true;
+        // Need to wait for the "socket" event to re-play the "data" events.
+        req.once('socket', (s) => {
+            debug$1('Replaying proxy buffer for failed request');
+            require$$5$5(s.listenerCount('data') > 0);
+            // Replay the "buffered" Buffer onto the fake `socket`, since at
+            // this point the HTTP module machinery has been hooked up for
+            // the user.
+            s.push(buffered);
+            s.push(null);
+        });
+        return fakeSocket;
+    }
+    /**
+     * Retry a CONNECT request with additional auth headers.
+     */
+    async _connectWithAuth(req, opts, authHeaders) {
+        const { proxy } = this;
+        let socket;
+        if (proxy.protocol === 'https:') {
+            socket = tls.connect(setServernameFromNonIpHost(this.connectOpts));
+        }
+        else {
+            socket = net.connect(this.connectOpts);
+        }
+        const headers = typeof this.proxyHeaders === 'function'
+            ? this.proxyHeaders()
+            : { ...this.proxyHeaders };
+        const host = net.isIPv6(opts.host) ? `[${opts.host}]` : opts.host;
+        let payload = `CONNECT ${host}:${opts.port} HTTP/1.1\r\n`;
+        if (proxy.username || proxy.password) {
+            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
+        }
+        // Merge auth headers (overrides existing)
+        Object.assign(headers, authHeaders);
+        headers.Host = `${host}:${opts.port}`;
+        if (!headers['Proxy-Connection']) {
+            headers['Proxy-Connection'] = this.keepAlive
+                ? 'Keep-Alive'
+                : 'close';
+        }
+        for (const name of Object.keys(headers)) {
+            payload += `${name}: ${headers[name]}\r\n`;
+        }
+        const proxyResponsePromise = parseProxyResponse(socket);
+        socket.write(`${payload}\r\n`);
+        const { connect } = await proxyResponsePromise;
+        req.emit('proxyConnect', connect);
+        this.emit('proxyConnect', connect, req);
+        if (connect.statusCode === 200) {
+            req.once('socket', resume);
+            if (opts.secureEndpoint) {
+                debug$1('Upgrading socket connection to TLS');
+                return tls.connect({
+                    ...omit$1(setServernameFromNonIpHost(opts), 'host', 'path', 'port'),
+                    socket,
+                });
+            }
+            return socket;
+        }
+        // If still not 200, throw
+        socket.destroy();
+        throw new Error(`Proxy authentication failed with status ${connect.statusCode} after retry`);
+    }
+}
+HttpsProxyAgent.protocols = ['http', 'https'];
+function resume(socket) {
+    // Defer the resume so that all 'socket' event handlers have a chance
+    // to attach their listeners (e.g. the HTTP client's 'data' handler)
+    // before data starts flowing. Without this, buffered proxy-response
+    // data can be emitted synchronously before listeners are ready.
+    // See: https://github.com/nicolo-ribaudo/tc39-proposal-await-dictionary/issues/7
+    setImmediate(() => {
+        socket.resume();
+    });
+}
+function omit$1(obj, ...keys) {
+    const ret = {};
+    let key;
+    for (key in obj) {
+        if (!keys.includes(key)) {
+            ret[key] = obj[key];
+        }
+    }
+    return ret;
 }
 
-var distExports$1 = requireDist$1();
-
-var dist = {};
-
-var hasRequiredDist;
-
-function requireDist () {
-	if (hasRequiredDist) return dist;
-	hasRequiredDist = 1;
-	var __createBinding = (dist && dist.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    var desc = Object.getOwnPropertyDescriptor(m, k);
-	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-	      desc = { enumerable: true, get: function() { return m[k]; } };
-	    }
-	    Object.defineProperty(o, k2, desc);
-	}) : (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    o[k2] = m[k];
-	}));
-	var __setModuleDefault = (dist && dist.__setModuleDefault) || (Object.create ? (function(o, v) {
-	    Object.defineProperty(o, "default", { enumerable: true, value: v });
-	}) : function(o, v) {
-	    o["default"] = v;
-	});
-	var __importStar = (dist && dist.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
-	var __importDefault = (dist && dist.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(dist, "__esModule", { value: true });
-	dist.HttpProxyAgent = void 0;
-	const net = __importStar(require$$0$7);
-	const tls = __importStar(require$$1);
-	const debug_1 = __importDefault(requireSrc());
-	const events_1 = events$1;
-	const agent_base_1 = requireDist$2();
-	const url_1 = require$$5$6;
-	const debug = (0, debug_1.default)('http-proxy-agent');
-	/**
-	 * The `HttpProxyAgent` implements an HTTP Agent subclass that connects
-	 * to the specified "HTTP proxy server" in order to proxy HTTP requests.
-	 */
-	class HttpProxyAgent extends agent_base_1.Agent {
-	    constructor(proxy, opts) {
-	        super(opts);
-	        this.proxy = typeof proxy === 'string' ? new url_1.URL(proxy) : proxy;
-	        this.proxyHeaders = opts?.headers ?? {};
-	        debug('Creating new HttpProxyAgent instance: %o', this.proxy.href);
-	        // Trim off the brackets from IPv6 addresses
-	        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
-	        const port = this.proxy.port
-	            ? parseInt(this.proxy.port, 10)
-	            : this.proxy.protocol === 'https:'
-	                ? 443
-	                : 80;
-	        this.connectOpts = {
-	            ...(opts ? omit(opts, 'headers') : null),
-	            host,
-	            port,
-	        };
-	    }
-	    addRequest(req, opts) {
-	        req._header = null;
-	        this.setRequestProps(req, opts);
-	        // @ts-expect-error `addRequest()` isn't defined in `@types/node`
-	        super.addRequest(req, opts);
-	    }
-	    setRequestProps(req, opts) {
-	        const { proxy } = this;
-	        const protocol = opts.secureEndpoint ? 'https:' : 'http:';
-	        const hostname = req.getHeader('host') || 'localhost';
-	        const base = `${protocol}//${hostname}`;
-	        const url = new url_1.URL(req.path, base);
-	        if (opts.port !== 80) {
-	            url.port = String(opts.port);
-	        }
-	        // Change the `http.ClientRequest` instance's "path" field
-	        // to the absolute path of the URL that will be requested.
-	        req.path = String(url);
-	        // Inject the `Proxy-Authorization` header if necessary.
-	        const headers = typeof this.proxyHeaders === 'function'
-	            ? this.proxyHeaders()
-	            : { ...this.proxyHeaders };
-	        if (proxy.username || proxy.password) {
-	            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
-	            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
-	        }
-	        if (!headers['Proxy-Connection']) {
-	            headers['Proxy-Connection'] = this.keepAlive
-	                ? 'Keep-Alive'
-	                : 'close';
-	        }
-	        for (const name of Object.keys(headers)) {
-	            const value = headers[name];
-	            if (value) {
-	                req.setHeader(name, value);
-	            }
-	        }
-	    }
-	    async connect(req, opts) {
-	        req._header = null;
-	        if (!req.path.includes('://')) {
-	            this.setRequestProps(req, opts);
-	        }
-	        // At this point, the http ClientRequest's internal `_header` field
-	        // might have already been set. If this is the case then we'll need
-	        // to re-generate the string since we just changed the `req.path`.
-	        let first;
-	        let endOfHeaders;
-	        debug('Regenerating stored HTTP header string for request');
-	        req._implicitHeader();
-	        if (req.outputData && req.outputData.length > 0) {
-	            debug('Patching connection write() output buffer with updated header');
-	            first = req.outputData[0].data;
-	            endOfHeaders = first.indexOf('\r\n\r\n') + 4;
-	            req.outputData[0].data =
-	                req._header + first.substring(endOfHeaders);
-	            debug('Output buffer: %o', req.outputData[0].data);
-	        }
-	        // Create a socket connection to the proxy server.
-	        let socket;
-	        if (this.proxy.protocol === 'https:') {
-	            debug('Creating `tls.Socket`: %o', this.connectOpts);
-	            socket = tls.connect(this.connectOpts);
-	        }
-	        else {
-	            debug('Creating `net.Socket`: %o', this.connectOpts);
-	            socket = net.connect(this.connectOpts);
-	        }
-	        // Wait for the socket's `connect` event, so that this `callback()`
-	        // function throws instead of the `http` request machinery. This is
-	        // important for i.e. `PacProxyAgent` which determines a failed proxy
-	        // connection via the `callback()` function throwing.
-	        await (0, events_1.once)(socket, 'connect');
-	        return socket;
-	    }
-	}
-	HttpProxyAgent.protocols = ['http', 'https'];
-	dist.HttpProxyAgent = HttpProxyAgent;
-	function omit(obj, ...keys) {
-	    const ret = {};
-	    let key;
-	    for (key in obj) {
-	        if (!keys.includes(key)) {
-	            ret[key] = obj[key];
-	        }
-	    }
-	    return ret;
-	}
-	
-	return dist;
+const debug = createDebug('http-proxy-agent');
+/**
+ * The `HttpProxyAgent` implements an HTTP Agent subclass that connects
+ * to the specified "HTTP proxy server" in order to proxy HTTP requests.
+ */
+class HttpProxyAgent extends Agent {
+    constructor(proxy, opts) {
+        super(opts);
+        this.proxy = typeof proxy === 'string' ? new URL$1(proxy) : proxy;
+        this.proxyHeaders = opts?.headers ?? {};
+        debug('Creating new HttpProxyAgent instance: %o', this.proxy.href);
+        if (opts?.negotiate) {
+            this.onProxyAuth = createNegotiateAuth();
+        }
+        else if (opts?.onProxyAuth) {
+            this.onProxyAuth = opts.onProxyAuth;
+        }
+        // Trim off the brackets from IPv6 addresses
+        const host = (this.proxy.hostname || this.proxy.host).replace(/^\[|\]$/g, '');
+        const port = this.proxy.port
+            ? parseInt(this.proxy.port, 10)
+            : this.proxy.protocol === 'https:'
+                ? 443
+                : 80;
+        this.connectOpts = {
+            ...(opts
+                ? omit(opts, 'headers', 'onProxyAuth', 'negotiate')
+                : null),
+            host,
+            port,
+        };
+    }
+    addRequest(req, opts) {
+        req._header = null;
+        this.setRequestProps(req, opts);
+        // @ts-expect-error `addRequest()` isn't defined in `@types/node`
+        super.addRequest(req, opts);
+    }
+    setRequestProps(req, opts) {
+        const { proxy } = this;
+        const protocol = opts.secureEndpoint ? 'https:' : 'http:';
+        const hostname = req.getHeader('host') || 'localhost';
+        const base = `${protocol}//${hostname}`;
+        const url = new URL$1(req.path, base);
+        if (opts.port !== 80) {
+            url.port = String(opts.port);
+        }
+        // Change the `http.ClientRequest` instance's "path" field
+        // to the absolute path of the URL that will be requested.
+        req.path = String(url);
+        // Inject the `Proxy-Authorization` header if necessary.
+        const headers = typeof this.proxyHeaders === 'function'
+            ? this.proxyHeaders()
+            : { ...this.proxyHeaders };
+        if (proxy.username || proxy.password) {
+            const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+            headers['Proxy-Authorization'] = `Basic ${Buffer.from(auth).toString('base64')}`;
+        }
+        if (!headers['Proxy-Connection']) {
+            headers['Proxy-Connection'] = this.keepAlive
+                ? 'Keep-Alive'
+                : 'close';
+        }
+        for (const name of Object.keys(headers)) {
+            const value = headers[name];
+            if (value) {
+                req.setHeader(name, value);
+            }
+        }
+    }
+    async connect(req, opts) {
+        req._header = null;
+        if (!req.path.includes('://')) {
+            this.setRequestProps(req, opts);
+        }
+        // At this point, the http ClientRequest's internal `_header` field
+        // might have already been set. If this is the case then we'll need
+        // to re-generate the string since we just changed the `req.path`.
+        let first;
+        let endOfHeaders;
+        debug('Regenerating stored HTTP header string for request');
+        req._implicitHeader();
+        if (req.outputData && req.outputData.length > 0) {
+            debug('Patching connection write() output buffer with updated header');
+            first = req.outputData[0].data;
+            endOfHeaders = first.indexOf('\r\n\r\n') + 4;
+            req.outputData[0].data =
+                req._header + first.substring(endOfHeaders);
+            debug('Output buffer: %o', req.outputData[0].data);
+        }
+        // Create a socket connection to the proxy server.
+        let socket;
+        if (this.proxy.protocol === 'https:') {
+            debug('Creating `tls.Socket`: %o', this.connectOpts);
+            socket = tls.connect(this.connectOpts);
+        }
+        else {
+            debug('Creating `net.Socket`: %o', this.connectOpts);
+            socket = net.connect(this.connectOpts);
+        }
+        // Wait for the socket's `connect` event, so that this `callback()`
+        // function throws instead of the `http` request machinery. This is
+        // important for i.e. `PacProxyAgent` which determines a failed proxy
+        // connection via the `callback()` function throwing.
+        await once(socket, 'connect');
+        // Emit the 'proxyConnect' event for parity with https-proxy-agent
+        const connect = { socket };
+        req.emit('proxyConnect', connect);
+        this.emit('proxyConnect', connect, req);
+        req.emit('proxy', { proxy: this.proxy.href, socket });
+        return socket;
+    }
 }
-
-var distExports = requireDist();
+HttpProxyAgent.protocols = ['http', 'https'];
+function omit(obj, ...keys) {
+    const ret = {};
+    let key;
+    for (key in obj) {
+        if (!keys.includes(key)) {
+            ret[key] = obj[key];
+        }
+    }
+    return ret;
+}
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const HTTPS_PROXY$1 = "HTTPS_PROXY";
-const HTTP_PROXY$1 = "HTTP_PROXY";
-const ALL_PROXY$1 = "ALL_PROXY";
-const NO_PROXY$1 = "NO_PROXY";
+const HTTPS_PROXY = "HTTPS_PROXY";
+const HTTP_PROXY = "HTTP_PROXY";
+const ALL_PROXY = "ALL_PROXY";
+const NO_PROXY = "NO_PROXY";
 /**
  * The programmatic identifier of the proxyPolicy.
  */
-const proxyPolicyName$1 = "proxyPolicy";
+const proxyPolicyName = "proxyPolicy";
 /**
  * Stores the patterns specified in NO_PROXY environment variable.
  * @internal
  */
-const globalNoProxyList$1 = [];
-let noProxyListLoaded$1 = false;
+const globalNoProxyList = [];
+let noProxyListLoaded = false;
 /** A cache of whether a host should bypass the proxy. */
-const globalBypassedMap$1 = new Map();
-function getEnvironmentValue$1(name) {
+const globalBypassedMap = new Map();
+function getEnvironmentValue(name) {
     if (process.env[name]) {
         return process.env[name];
     }
@@ -32403,13 +33521,13 @@ function getEnvironmentValue$1(name) {
     }
     return undefined;
 }
-function loadEnvironmentProxyValue$1() {
+function loadEnvironmentProxyValue() {
     if (!process) {
         return undefined;
     }
-    const httpsProxy = getEnvironmentValue$1(HTTPS_PROXY$1);
-    const allProxy = getEnvironmentValue$1(ALL_PROXY$1);
-    const httpProxy = getEnvironmentValue$1(HTTP_PROXY$1);
+    const httpsProxy = getEnvironmentValue(HTTPS_PROXY);
+    const allProxy = getEnvironmentValue(ALL_PROXY);
+    const httpProxy = getEnvironmentValue(HTTP_PROXY);
     return httpsProxy || allProxy || httpProxy;
 }
 /**
@@ -32417,7 +33535,7 @@ function loadEnvironmentProxyValue$1() {
  * If there's a match, any request sent to the same host shouldn't have the proxy settings set.
  * This implementation is a port of https://github.com/Azure/azure-sdk-for-net/blob/8cca811371159e527159c7eb65602477898683e2/sdk/core/Azure.Core/src/Pipeline/Internal/HttpEnvironmentProxy.cs#L210
  */
-function isBypassed$1(uri, noProxyList, bypassedMap) {
+function isBypassed(uri, noProxyList, bypassedMap) {
     if (noProxyList.length === 0) {
         return false;
     }
@@ -32448,9 +33566,9 @@ function isBypassed$1(uri, noProxyList, bypassedMap) {
     bypassedMap?.set(host, isBypassedFlag);
     return isBypassedFlag;
 }
-function loadNoProxy$1() {
-    const noProxy = getEnvironmentValue$1(NO_PROXY$1);
-    noProxyListLoaded$1 = true;
+function loadNoProxy() {
+    const noProxy = getEnvironmentValue(NO_PROXY);
+    noProxyListLoaded = true;
     if (noProxy) {
         return noProxy
             .split(",")
@@ -32463,11 +33581,11 @@ function loadNoProxy$1() {
  * This method attempts to parse a proxy URL from the environment
  * variables `HTTPS_PROXY` or `HTTP_PROXY`.
  */
-function getDefaultProxySettingsInternal$1() {
-    const envProxy = loadEnvironmentProxyValue$1();
+function getDefaultProxySettingsInternal() {
+    const envProxy = loadEnvironmentProxyValue();
     return envProxy ? new URL(envProxy) : undefined;
 }
-function getUrlFromProxySettings$1(settings) {
+function getUrlFromProxySettings(settings) {
     let parsedProxyUrl;
     try {
         parsedProxyUrl = new URL(settings.host);
@@ -32484,7 +33602,7 @@ function getUrlFromProxySettings$1(settings) {
     }
     return parsedProxyUrl;
 }
-function setProxyAgentOnRequest$1(request, cachedAgents, proxyUrl) {
+function setProxyAgentOnRequest(request, cachedAgents, proxyUrl) {
     // Custom Agent should take precedence so if one is present
     // we should skip to avoid overwriting it.
     if (request.agent) {
@@ -32493,18 +33611,17 @@ function setProxyAgentOnRequest$1(request, cachedAgents, proxyUrl) {
     const url = new URL(request.url);
     const isInsecure = url.protocol !== "https:";
     if (request.tlsSettings) {
-        logger$9.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored.");
+        logger$6.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored.");
     }
-    const headers = request.headers.toJSON();
     if (isInsecure) {
         if (!cachedAgents.httpProxyAgent) {
-            cachedAgents.httpProxyAgent = new distExports.HttpProxyAgent(proxyUrl, { headers });
+            cachedAgents.httpProxyAgent = new HttpProxyAgent(proxyUrl);
         }
         request.agent = cachedAgents.httpProxyAgent;
     }
     else {
         if (!cachedAgents.httpsProxyAgent) {
-            cachedAgents.httpsProxyAgent = new distExports$1.HttpsProxyAgent(proxyUrl, { headers });
+            cachedAgents.httpsProxyAgent = new HttpsProxyAgent(proxyUrl);
         }
         request.agent = cachedAgents.httpsProxyAgent;
     }
@@ -32516,24 +33633,24 @@ function setProxyAgentOnRequest$1(request, cachedAgents, proxyUrl) {
  * @param proxySettings - ProxySettings to use on each request.
  * @param options - additional settings, for example, custom NO_PROXY patterns
  */
-function proxyPolicy$3(proxySettings, options) {
-    if (!noProxyListLoaded$1) {
-        globalNoProxyList$1.push(...loadNoProxy$1());
+function proxyPolicy$1(proxySettings, options) {
+    if (!noProxyListLoaded) {
+        globalNoProxyList.push(...loadNoProxy());
     }
     const defaultProxy = proxySettings
-        ? getUrlFromProxySettings$1(proxySettings)
-        : getDefaultProxySettingsInternal$1();
+        ? getUrlFromProxySettings(proxySettings)
+        : getDefaultProxySettingsInternal();
     const cachedAgents = {};
     return {
-        name: proxyPolicyName$1,
+        name: proxyPolicyName,
         async sendRequest(request, next) {
             if (!request.proxySettings &&
                 defaultProxy &&
-                !isBypassed$1(request.url, globalNoProxyList$1, globalBypassedMap$1)) {
-                setProxyAgentOnRequest$1(request, cachedAgents, defaultProxy);
+                !isBypassed(request.url, globalNoProxyList, globalBypassedMap)) {
+                setProxyAgentOnRequest(request, cachedAgents, defaultProxy);
             }
             else if (request.proxySettings) {
-                setProxyAgentOnRequest$1(request, cachedAgents, getUrlFromProxySettings$1(request.proxySettings));
+                setProxyAgentOnRequest(request, cachedAgents, getUrlFromProxySettings(request.proxySettings));
             }
             return next(request);
         },
@@ -32543,21 +33660,22 @@ function proxyPolicy$3(proxySettings, options) {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
- * Name of the Agent Policy
+ * The programmatic identifier of the decompressResponsePolicy.
  */
-const agentPolicyName$1 = "agentPolicy";
+const decompressResponsePolicyName = "decompressResponsePolicy";
 /**
- * Gets a pipeline policy that sets http.agent
+ * A policy to enable response decompression according to Accept-Encoding header
+ * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
  */
-function agentPolicy$3(agent) {
+function decompressResponsePolicy$1() {
     return {
-        name: agentPolicyName$1,
-        sendRequest: async (req, next) => {
-            // Users may define an agent on the request, honor it over the client level one
-            if (!req.agent) {
-                req.agent = agent;
+        name: decompressResponsePolicyName,
+        async sendRequest(request, next) {
+            // HEAD requests have no body
+            if (request.method !== "HEAD") {
+                request.headers.set("Accept-Encoding", "gzip,deflate");
             }
-            return next(req);
+            return next(request);
         },
     };
 }
@@ -32565,34 +33683,76 @@ function agentPolicy$3(agent) {
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
- * Name of the TLS Policy
+ * The programmatic identifier of the redirectPolicy.
  */
-const tlsPolicyName$1 = "tlsPolicy";
+const redirectPolicyName = "redirectPolicy";
 /**
- * Gets a pipeline policy that adds the client certificate to the HttpClient agent for authentication.
+ * Methods that are allowed to follow redirects 301 and 302
  */
-function tlsPolicy$3(tlsSettings) {
+const allowedRedirect = ["GET", "HEAD"];
+/**
+ * A policy to follow Location headers from the server in order
+ * to support server-side redirection.
+ * In the browser, this policy is not used.
+ * @param options - Options to control policy behavior.
+ */
+function redirectPolicy$1(options = {}) {
+    const { maxRetries = 20, allowCrossOriginRedirects = false } = options;
     return {
-        name: tlsPolicyName$1,
-        sendRequest: async (req, next) => {
-            // Users may define a request tlsSettings, honor those over the client level one
-            if (!req.tlsSettings) {
-                req.tlsSettings = tlsSettings;
-            }
-            return next(req);
+        name: redirectPolicyName,
+        async sendRequest(request, next) {
+            const response = await next(request);
+            return handleRedirect(next, response, maxRetries, allowCrossOriginRedirects);
         },
     };
 }
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function isBlob$1(x) {
-    return typeof x.stream === "function";
+async function handleRedirect(next, response, maxRetries, allowCrossOriginRedirects, currentRetries = 0) {
+    const { request, status, headers } = response;
+    const locationHeader = headers.get("location");
+    if (locationHeader &&
+        (status === 300 ||
+            (status === 301 && allowedRedirect.includes(request.method)) ||
+            (status === 302 && allowedRedirect.includes(request.method)) ||
+            (status === 303 && request.method === "POST") ||
+            status === 307) &&
+        currentRetries < maxRetries) {
+        const url = new URL(locationHeader, request.url);
+        // Only follow redirects to the same origin by default.
+        if (!allowCrossOriginRedirects) {
+            const originalUrl = new URL(request.url);
+            if (url.origin !== originalUrl.origin) {
+                logger$6.verbose(`Skipping cross-origin redirect from ${originalUrl.origin} to ${url.origin}.`);
+                return response;
+            }
+        }
+        request.url = url.toString();
+        // POST request with Status code 303 should be converted into a
+        // redirected GET request if the redirect url is present in the location header
+        if (status === 303) {
+            request.method = "GET";
+            if (request.requestOverrides && "method" in request.requestOverrides) {
+                request.requestOverrides = { ...request.requestOverrides, method: "GET" };
+            }
+            removeRequestBodyHeaders(request);
+            delete request.body;
+        }
+        request.headers.delete("Authorization");
+        await disposeResponseBody(response);
+        const res = await next(request);
+        return handleRedirect(next, res, maxRetries, allowCrossOriginRedirects, currentRetries + 1);
+    }
+    return response;
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-async function* streamAsyncIterator$1() {
+function isBlob(x) {
+    return x instanceof Blob;
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+async function* streamAsyncIterator() {
     const reader = this.getReader();
     try {
         while (true) {
@@ -32607,32 +33767,32 @@ async function* streamAsyncIterator$1() {
         reader.releaseLock();
     }
 }
-function makeAsyncIterable$1(webStream) {
+function makeAsyncIterable(webStream) {
     if (!webStream[Symbol.asyncIterator]) {
-        webStream[Symbol.asyncIterator] = streamAsyncIterator$1.bind(webStream);
+        webStream[Symbol.asyncIterator] = streamAsyncIterator.bind(webStream);
     }
     if (!webStream.values) {
-        webStream.values = streamAsyncIterator$1.bind(webStream);
+        webStream.values = streamAsyncIterator.bind(webStream);
     }
 }
-function ensureNodeStream$1(stream) {
+function ensureNodeStream(stream) {
     if (stream instanceof ReadableStream) {
-        makeAsyncIterable$1(stream);
+        makeAsyncIterable(stream);
         return Readable.fromWeb(stream);
     }
     else {
         return stream;
     }
 }
-function toStream$1(source) {
+function toStream(source) {
     if (source instanceof Uint8Array) {
         return Readable.from(Buffer.from(source));
     }
-    else if (isBlob$1(source)) {
-        return ensureNodeStream$1(source.stream());
+    else if (isBlob(source)) {
+        return ensureNodeStream(source.stream());
     }
     else {
-        return ensureNodeStream$1(source);
+        return ensureNodeStream(source);
     }
 }
 /**
@@ -32644,9 +33804,9 @@ function toStream$1(source) {
  *
  * @internal
  */
-async function concat$1(sources) {
+async function concat(sources) {
     return function () {
-        const streams = sources.map((x) => (typeof x === "function" ? x() : x)).map(toStream$1);
+        const streams = sources.map((x) => (typeof x === "function" ? x() : x)).map(toStream);
         return Readable.from((async function* () {
             for (const stream of streams) {
                 for await (const chunk of stream) {
@@ -32659,21 +33819,21 @@ async function concat$1(sources) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-function generateBoundary$1() {
-    return `----AzSDKFormBoundary${randomUUID$1()}`;
+function generateBoundary() {
+    return `----AzSDKFormBoundary${randomUUID()}`;
 }
-function encodeHeaders$1(headers) {
+function encodeHeaders(headers) {
     let result = "";
     for (const [key, value] of headers) {
         result += `${key}: ${value}\r\n`;
     }
     return result;
 }
-function getLength$1(source) {
+function getLength(source) {
     if (source instanceof Uint8Array) {
         return source.byteLength;
     }
-    else if (isBlob$1(source)) {
+    else if (isBlob(source)) {
         // if was created using createFile then -1 means we have an unknown size
         return source.size === -1 ? undefined : source.size;
     }
@@ -32681,10 +33841,10 @@ function getLength$1(source) {
         return undefined;
     }
 }
-function getTotalLength$1(sources) {
+function getTotalLength(sources) {
     let total = 0;
     for (const source of sources) {
-        const partLength = getLength$1(source);
+        const partLength = getLength(source);
         if (partLength === undefined) {
             return undefined;
         }
@@ -32694,44 +33854,48 @@ function getTotalLength$1(sources) {
     }
     return total;
 }
-async function buildRequestBody$1(request, parts, boundary) {
+async function buildRequestBody(request, parts, boundary) {
     const sources = [
         stringToUint8Array$1(`--${boundary}`, "utf-8"),
         ...parts.flatMap((part) => [
             stringToUint8Array$1("\r\n", "utf-8"),
-            stringToUint8Array$1(encodeHeaders$1(part.headers), "utf-8"),
+            stringToUint8Array$1(encodeHeaders(part.headers), "utf-8"),
             stringToUint8Array$1("\r\n", "utf-8"),
             part.body,
             stringToUint8Array$1(`\r\n--${boundary}`, "utf-8"),
         ]),
         stringToUint8Array$1("--\r\n\r\n", "utf-8"),
     ];
-    const contentLength = getTotalLength$1(sources);
+    const contentLength = getTotalLength(sources);
     if (contentLength) {
         request.headers.set("Content-Length", contentLength);
     }
-    request.body = await concat$1(sources);
+    // The public BodyPart.body type uses Uint8Array (= Uint8Array<ArrayBufferLike>) for
+    // backward compatibility. Internally, concat requires Uint8Array<ArrayBuffer> to ensure
+    // SharedArrayBuffer-backed arrays don't flow into Blob construction. In practice, HTTP
+    // request bodies are always ArrayBuffer-backed, so this narrowing is safe.
+    request.body = await concat(sources);
 }
 /**
  * Name of multipart policy
  */
-const multipartPolicyName$3 = "multipartPolicy";
-const maxBoundaryLength$1 = 70;
-const validBoundaryCharacters$1 = new Set(`abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'()+,-./:=?`);
-function assertValidBoundary$1(boundary) {
-    if (boundary.length > maxBoundaryLength$1) {
+const multipartPolicyName$1 = "multipartPolicy";
+const maxBoundaryLength = 70;
+const validBoundaryCharacters = new Set(`abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'()+,-./:=?`);
+function assertValidBoundary(boundary) {
+    if (boundary.length > maxBoundaryLength) {
         throw new Error(`Multipart boundary "${boundary}" exceeds maximum length of 70 characters`);
     }
-    if (Array.from(boundary).some((x) => !validBoundaryCharacters$1.has(x))) {
+    if (Array.from(boundary).some((x) => !validBoundaryCharacters.has(x))) {
         throw new Error(`Multipart boundary "${boundary}" contains invalid characters`);
     }
 }
 /**
  * Pipeline policy for multipart requests
  */
-function multipartPolicy$3() {
+function multipartPolicy$1() {
     return {
-        name: multipartPolicyName$3,
+        name: multipartPolicyName$1,
         async sendRequest(request, next) {
             if (!request.multipartBody) {
                 return next(request);
@@ -32751,13 +33915,13 @@ function multipartPolicy$3() {
             }
             boundary ??= parsedBoundary;
             if (boundary) {
-                assertValidBoundary$1(boundary);
+                assertValidBoundary(boundary);
             }
             else {
-                boundary = generateBoundary$1();
+                boundary = generateBoundary();
             }
             request.headers.set("Content-Type", `${contentType}; boundary=${boundary}`);
-            await buildRequestBody$1(request, request.multipartBody.parts, boundary);
+            await buildRequestBody(request, request.multipartBody.parts, boundary);
             request.multipartBody = undefined;
             return next(request);
         },
@@ -32770,28 +33934,34 @@ function multipartPolicy$3() {
  * Creates a totally empty pipeline.
  * Useful for testing or creating a custom one.
  */
-function createEmptyPipeline$2() {
-    return createEmptyPipeline$3();
+function createEmptyPipeline() {
+    return createEmptyPipeline$1();
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const context$2 = createLoggerContext$1({
+const context = createLoggerContext({
     logLevelEnvVarName: "AZURE_LOG_LEVEL",
     namespace: "azure",
 });
+/**
+ * Retrieves the currently specified log level.
+ */
+function getLogLevel() {
+    return context.getLogLevel();
+}
 /**
  * Creates a logger for use by the Azure SDKs that inherits from `AzureLogger`.
  * @param namespace - The name of the SDK package.
  * @hidden
  */
-function createClientLogger$2(namespace) {
-    return context$2.createClientLogger(namespace);
+function createClientLogger(namespace) {
+    return context.createClientLogger(namespace);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$8 = createClientLogger$2("core-rest-pipeline");
+const logger$5 = createClientLogger("core-rest-pipeline");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -32799,9 +33969,9 @@ const logger$8 = createClientLogger$2("core-rest-pipeline");
  * A policy that logs all requests and responses.
  * @param options - Options to configure logPolicy.
  */
-function logPolicy$2(options = {}) {
-    return logPolicy$3({
-        logger: logger$8.info,
+function logPolicy(options = {}) {
+    return logPolicy$1({
+        logger: logger$5.info,
         ...options,
     });
 }
@@ -32814,8 +33984,8 @@ function logPolicy$2(options = {}) {
  * In the browser, this policy is not used.
  * @param options - Options to control policy behavior.
  */
-function redirectPolicy$2(options = {}) {
-    return redirectPolicy$3(options);
+function redirectPolicy(options = {}) {
+    return redirectPolicy$1(options);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -32823,35 +33993,34 @@ function redirectPolicy$2(options = {}) {
 /**
  * @internal
  */
-function getHeaderName$1() {
+function getHeaderName() {
     return "User-Agent";
 }
 /**
  * @internal
  */
-async function setPlatformSpecificData$1(map) {
+async function setPlatformSpecificData(map) {
     if (process$1 && process$1.versions) {
         const osInfo = `${os$1.type()} ${os$1.release()}; ${os$1.arch()}`;
-        const versions = process$1.versions;
-        if (versions.bun) {
-            map.set("Bun", `${versions.bun} (${osInfo})`);
+        if (process$1.versions.bun) {
+            map.set("Bun", `${process$1.versions.bun} (${osInfo})`);
         }
-        else if (versions.deno) {
-            map.set("Deno", `${versions.deno} (${osInfo})`);
+        else if (process$1.versions.deno) {
+            map.set("Deno", `${process$1.versions.deno} (${osInfo})`);
         }
-        else if (versions.node) {
-            map.set("Node", `${versions.node} (${osInfo})`);
+        else if (process$1.versions.node) {
+            map.set("Node", `${process$1.versions.node} (${osInfo})`);
         }
     }
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const SDK_VERSION$3 = "1.22.3";
+const SDK_VERSION$2 = "1.25.1";
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-function getUserAgentString$1(telemetryInfo) {
+function getUserAgentString(telemetryInfo) {
     const parts = [];
     for (const [key, value] of telemetryInfo) {
         const token = value ? `${key}/${value}` : key;
@@ -32862,40 +34031,40 @@ function getUserAgentString$1(telemetryInfo) {
 /**
  * @internal
  */
-function getUserAgentHeaderName$1() {
-    return getHeaderName$1();
+function getUserAgentHeaderName() {
+    return getHeaderName();
 }
 /**
  * @internal
  */
-async function getUserAgentValue$1(prefix) {
+async function getUserAgentValue(prefix) {
     const runtimeInfo = new Map();
-    runtimeInfo.set("core-rest-pipeline", SDK_VERSION$3);
-    await setPlatformSpecificData$1(runtimeInfo);
-    const defaultAgent = getUserAgentString$1(runtimeInfo);
+    runtimeInfo.set("core-rest-pipeline", SDK_VERSION$2);
+    await setPlatformSpecificData(runtimeInfo);
+    const defaultAgent = getUserAgentString(runtimeInfo);
     const userAgentValue = prefix ? `${prefix} ${defaultAgent}` : defaultAgent;
     return userAgentValue;
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const UserAgentHeaderName$1 = getUserAgentHeaderName$1();
+const UserAgentHeaderName = getUserAgentHeaderName();
 /**
  * The programmatic identifier of the userAgentPolicy.
  */
-const userAgentPolicyName$1 = "userAgentPolicy";
+const userAgentPolicyName = "userAgentPolicy";
 /**
  * A policy that sets the User-Agent header (or equivalent) to reflect
  * the library version.
  * @param options - Options to customize the user agent value.
  */
-function userAgentPolicy$1(options = {}) {
-    const userAgentValue = getUserAgentValue$1(options.userAgentPrefix);
+function userAgentPolicy(options = {}) {
+    const userAgentValue = getUserAgentValue(options.userAgentPrefix);
     return {
-        name: userAgentPolicyName$1,
+        name: userAgentPolicyName,
         async sendRequest(request, next) {
-            if (!request.headers.has(UserAgentHeaderName$1)) {
-                request.headers.set(UserAgentHeaderName$1, await userAgentValue);
+            if (!request.headers.has(UserAgentHeaderName)) {
+                request.headers.set(UserAgentHeaderName, await userAgentValue);
             }
             return next(request);
         },
@@ -32918,12 +34087,12 @@ function userAgentPolicy$1(options = {}) {
  *
  * @internal
  */
-const rawContent$1 = Symbol("rawContent");
+const rawContent = Symbol("rawContent");
 /**
  * Type guard to check if a given object is a blob-like object with a raw content property.
  */
-function hasRawContent$1(x) {
-    return typeof x[rawContent$1] === "function";
+function hasRawContent(x) {
+    return typeof x[rawContent] === "function";
 }
 /**
  * Extract the raw content from a given blob-like object. If the input was created using createFile
@@ -32932,9 +34101,9 @@ function hasRawContent$1(x) {
  *
  * @internal
  */
-function getRawContent$1(blob) {
-    if (hasRawContent$1(blob)) {
-        return blob[rawContent$1]();
+function getRawContent(blob) {
+    if (hasRawContent(blob)) {
+        return blob[rawContent]();
     }
     else {
         return blob;
@@ -32946,19 +34115,19 @@ function getRawContent$1(blob) {
 /**
  * Name of multipart policy
  */
-const multipartPolicyName$2 = multipartPolicyName$3;
+const multipartPolicyName = multipartPolicyName$1;
 /**
  * Pipeline policy for multipart requests
  */
-function multipartPolicy$2() {
-    const tspPolicy = multipartPolicy$3();
+function multipartPolicy() {
+    const tspPolicy = multipartPolicy$1();
     return {
-        name: multipartPolicyName$2,
+        name: multipartPolicyName,
         sendRequest: async (request, next) => {
             if (request.multipartBody) {
                 for (const part of request.multipartBody.parts) {
-                    if (hasRawContent$1(part.body)) {
-                        part.body = getRawContent$1(part.body);
+                    if (hasRawContent(part.body)) {
+                        part.body = getRawContent(part.body);
                     }
                 }
             }
@@ -32973,8 +34142,8 @@ function multipartPolicy$2() {
  * A policy to enable response decompression according to Accept-Encoding header
  * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
  */
-function decompressResponsePolicy$2() {
-    return decompressResponsePolicy$3();
+function decompressResponsePolicy() {
+    return decompressResponsePolicy$1();
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -32985,8 +34154,8 @@ function decompressResponsePolicy$2() {
  * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
  * - Or otherwise if the outgoing request fails, it will retry with an exponentially increasing delay.
  */
-function defaultRetryPolicy$2(options = {}) {
-    return defaultRetryPolicy$3(options);
+function defaultRetryPolicy(options = {}) {
+    return defaultRetryPolicy$1(options);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -32994,8 +34163,8 @@ function defaultRetryPolicy$2(options = {}) {
 /**
  * A policy that encodes FormData on the request into the body.
  */
-function formDataPolicy$2() {
-    return formDataPolicy$3();
+function formDataPolicy() {
+    return formDataPolicy$1();
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33007,8 +34176,8 @@ function formDataPolicy$2() {
  * @param proxySettings - ProxySettings to use on each request.
  * @param options - additional settings, for example, custom NO_PROXY patterns
  */
-function proxyPolicy$2(proxySettings, options) {
-    return proxyPolicy$3(proxySettings);
+function proxyPolicy(proxySettings, options) {
+    return proxyPolicy$1(proxySettings);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33016,16 +34185,16 @@ function proxyPolicy$2(proxySettings, options) {
 /**
  * The programmatic identifier of the setClientRequestIdPolicy.
  */
-const setClientRequestIdPolicyName$1 = "setClientRequestIdPolicy";
+const setClientRequestIdPolicyName = "setClientRequestIdPolicy";
 /**
  * Each PipelineRequest gets a unique id upon creation.
  * This policy passes that unique id along via an HTTP header to enable better
  * telemetry and tracing.
  * @param requestIdHeaderName - The name of the header to pass the request ID to.
  */
-function setClientRequestIdPolicy$1(requestIdHeaderName = "x-ms-client-request-id") {
+function setClientRequestIdPolicy(requestIdHeaderName = "x-ms-client-request-id") {
     return {
-        name: setClientRequestIdPolicyName$1,
+        name: setClientRequestIdPolicyName,
         async sendRequest(request, next) {
             if (!request.headers.has(requestIdHeaderName)) {
                 request.headers.set(requestIdHeaderName, request.requestId);
@@ -33040,8 +34209,8 @@ function setClientRequestIdPolicy$1(requestIdHeaderName = "x-ms-client-request-i
 /**
  * Gets a pipeline policy that sets http.agent
  */
-function agentPolicy$2(agent) {
-    return agentPolicy$3(agent);
+function agentPolicy(agent) {
+    return agentPolicy$1(agent);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33049,14 +34218,14 @@ function agentPolicy$2(agent) {
 /**
  * Gets a pipeline policy that adds the client certificate to the HttpClient agent for authentication.
  */
-function tlsPolicy$2(tlsSettings) {
-    return tlsPolicy$3(tlsSettings);
+function tlsPolicy(tlsSettings) {
+    return tlsPolicy$1(tlsSettings);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /** @internal */
-const knownContextKeys$1 = {
+const knownContextKeys = {
     span: Symbol.for("@azure/core-tracing span"),
     namespace: Symbol.for("@azure/core-tracing namespace"),
 };
@@ -33067,18 +34236,18 @@ const knownContextKeys$1 = {
  *
  * @internal
  */
-function createTracingContext$1(options = {}) {
-    let context = new TracingContextImpl$1(options.parentContext);
+function createTracingContext(options = {}) {
+    let context = new TracingContextImpl(options.parentContext);
     if (options.span) {
-        context = context.setValue(knownContextKeys$1.span, options.span);
+        context = context.setValue(knownContextKeys.span, options.span);
     }
     if (options.namespace) {
-        context = context.setValue(knownContextKeys$1.namespace, options.namespace);
+        context = context.setValue(knownContextKeys.namespace, options.namespace);
     }
     return context;
 }
 /** @internal */
-let TracingContextImpl$1 = class TracingContextImpl {
+class TracingContextImpl {
     _contextMap;
     constructor(initialContext) {
         this._contextMap =
@@ -33099,32 +34268,32 @@ let TracingContextImpl$1 = class TracingContextImpl {
         newContext._contextMap.delete(key);
         return newContext;
     }
-};
+}
 
-var state$5 = {};
+var stateCjs$1 = {};
 
-var hasRequiredState$1;
+var hasRequiredStateCjs$1;
 
-function requireState$1 () {
-	if (hasRequiredState$1) return state$5;
-	hasRequiredState$1 = 1;
+function requireStateCjs$1 () {
+	if (hasRequiredStateCjs$1) return stateCjs$1;
+	hasRequiredStateCjs$1 = 1;
 	// Copyright (c) Microsoft Corporation.
 	// Licensed under the MIT License.
-	Object.defineProperty(state$5, "__esModule", { value: true });
-	state$5.state = void 0;
+	Object.defineProperty(stateCjs$1, "__esModule", { value: true });
+	stateCjs$1.state = void 0;
 	/**
 	 * @internal
 	 *
 	 * Holds the singleton instrumenter, to be shared across CJS and ESM imports.
 	 */
-	state$5.state = {
+	stateCjs$1.state = {
 	    instrumenterImplementation: undefined,
 	};
 	
-	return state$5;
+	return stateCjs$1;
 }
 
-var stateExports$1 = requireState$1();
+var stateCjsExports$1 = requireStateCjs$1();
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -33133,11 +34302,11 @@ var stateExports$1 = requireState$1();
 /**
  * Defines the shared state between CJS and ESM by re-exporting the CJS state.
  */
-const state$4 = stateExports$1.state;
+const state$1 = stateCjsExports$1.state;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-function createDefaultTracingSpan$1() {
+function createDefaultTracingSpan() {
     return {
         end: () => {
             // noop
@@ -33157,7 +34326,7 @@ function createDefaultTracingSpan$1() {
         },
     };
 }
-function createDefaultInstrumenter$1() {
+function createDefaultInstrumenter() {
     return {
         createRequestHeaders: () => {
             return {};
@@ -33167,8 +34336,8 @@ function createDefaultInstrumenter$1() {
         },
         startSpan: (_name, spanOptions) => {
             return {
-                span: createDefaultTracingSpan$1(),
-                tracingContext: createTracingContext$1({ parentContext: spanOptions.tracingContext }),
+                span: createDefaultTracingSpan(),
+                tracingContext: createTracingContext({ parentContext: spanOptions.tracingContext }),
             };
         },
         withContext(_context, callback, ...callbackArgs) {
@@ -33181,11 +34350,11 @@ function createDefaultInstrumenter$1() {
  *
  * @returns The currently set instrumenter
  */
-function getInstrumenter$1() {
-    if (!state$4.instrumenterImplementation) {
-        state$4.instrumenterImplementation = createDefaultInstrumenter$1();
+function getInstrumenter() {
+    if (!state$1.instrumenterImplementation) {
+        state$1.instrumenterImplementation = createDefaultInstrumenter();
     }
-    return state$4.instrumenterImplementation;
+    return state$1.instrumenterImplementation;
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33196,21 +34365,21 @@ function getInstrumenter$1() {
  * @param options - Options used to configure the tracing client.
  * @returns - An instance of {@link TracingClient}.
  */
-function createTracingClient$1(options) {
+function createTracingClient(options) {
     const { namespace, packageName, packageVersion } = options;
     function startSpan(name, operationOptions, spanOptions) {
-        const startSpanResult = getInstrumenter$1().startSpan(name, {
+        const startSpanResult = getInstrumenter().startSpan(name, {
             ...spanOptions,
-            packageName: packageName,
-            packageVersion: packageVersion,
+            packageName,
+            packageVersion,
             tracingContext: operationOptions?.tracingOptions?.tracingContext,
         });
         let tracingContext = startSpanResult.tracingContext;
         const span = startSpanResult.span;
-        if (!tracingContext.getValue(knownContextKeys$1.namespace)) {
-            tracingContext = tracingContext.setValue(knownContextKeys$1.namespace, namespace);
+        if (!tracingContext.getValue(knownContextKeys.namespace)) {
+            tracingContext = tracingContext.setValue(knownContextKeys.namespace, namespace);
         }
-        span.setAttribute("az.namespace", tracingContext.getValue(knownContextKeys$1.namespace));
+        span.setAttribute("az.namespace", tracingContext.getValue(knownContextKeys.namespace));
         const updatedOptions = Object.assign({}, operationOptions, {
             tracingOptions: { ...operationOptions?.tracingOptions, tracingContext },
         });
@@ -33222,7 +34391,7 @@ function createTracingClient$1(options) {
     async function withSpan(name, operationOptions, callback, spanOptions) {
         const { span, updatedOptions } = startSpan(name, operationOptions, spanOptions);
         try {
-            const result = await withContext(updatedOptions.tracingOptions.tracingContext, () => Promise.resolve(callback(updatedOptions, span)));
+            const result = await withContext(updatedOptions.tracingOptions.tracingContext, () => callback(updatedOptions, span));
             span.setStatus({ status: "success" });
             return result;
         }
@@ -33235,7 +34404,7 @@ function createTracingClient$1(options) {
         }
     }
     function withContext(context, callback, ...callbackArgs) {
-        return getInstrumenter$1().withContext(context, callback, ...callbackArgs);
+        return getInstrumenter().withContext(context, callback, ...callbackArgs);
     }
     /**
      * Parses a traceparent header value into a span identifier.
@@ -33244,7 +34413,7 @@ function createTracingClient$1(options) {
      * @returns An implementation-specific identifier for the span.
      */
     function parseTraceparentHeader(traceparentHeader) {
-        return getInstrumenter$1().parseTraceparentHeader(traceparentHeader);
+        return getInstrumenter().parseTraceparentHeader(traceparentHeader);
     }
     /**
      * Creates a set of request headers to propagate tracing information to a backend.
@@ -33253,7 +34422,7 @@ function createTracingClient$1(options) {
      * @returns The set of headers to add to a request.
      */
     function createRequestHeaders(tracingContext) {
-        return getInstrumenter$1().createRequestHeaders(tracingContext);
+        return getInstrumenter().createRequestHeaders(tracingContext);
     }
     return {
         startSpan,
@@ -33270,13 +34439,13 @@ function createTracingClient$1(options) {
  * A custom error type for failed pipeline requests.
  */
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-const RestError$2 = RestError$3;
+const RestError = RestError$1;
 /**
  * Typeguard for RestError
  * @param e - Something caught by a catch clause.
  */
-function isRestError$2(e) {
-    return isRestError$3(e);
+function isRestError(e) {
+    return isRestError$1(e);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33284,21 +34453,21 @@ function isRestError$2(e) {
 /**
  * The programmatic identifier of the tracingPolicy.
  */
-const tracingPolicyName$1 = "tracingPolicy";
+const tracingPolicyName = "tracingPolicy";
 /**
  * A simple policy to create OpenTelemetry Spans for each request made by the pipeline
  * that has SpanOptions with a parent.
  * Requests made without a parent Span will not be recorded.
  * @param options - Options to configure the telemetry logged by the tracing policy.
  */
-function tracingPolicy$1(options = {}) {
-    const userAgentPromise = getUserAgentValue$1(options.userAgentPrefix);
-    const sanitizer = new Sanitizer$1({
+function tracingPolicy(options = {}) {
+    const userAgentPromise = getUserAgentValue(options.userAgentPrefix);
+    const sanitizer = new Sanitizer({
         additionalAllowedQueryParameters: options.additionalAllowedQueryParameters,
     });
-    const tracingClient = tryCreateTracingClient$1();
+    const tracingClient = tryCreateTracingClient();
     return {
-        name: tracingPolicyName$1,
+        name: tracingPolicyName,
         async sendRequest(request, next) {
             if (!tracingClient) {
                 return next(request);
@@ -33313,36 +34482,36 @@ function tracingPolicy$1(options = {}) {
             if (userAgent) {
                 spanAttributes["http.user_agent"] = userAgent;
             }
-            const { span, tracingContext } = tryCreateSpan$1(tracingClient, request, spanAttributes) ?? {};
+            const { span, tracingContext } = tryCreateSpan(tracingClient, request, spanAttributes) ?? {};
             if (!span || !tracingContext) {
                 return next(request);
             }
             try {
                 const response = await tracingClient.withContext(tracingContext, next, request);
-                tryProcessResponse$1(span, response);
+                tryProcessResponse(span, response);
                 return response;
             }
             catch (err) {
-                tryProcessError$1(span, err);
+                tryProcessError(span, err);
                 throw err;
             }
         },
     };
 }
-function tryCreateTracingClient$1() {
+function tryCreateTracingClient() {
     try {
-        return createTracingClient$1({
+        return createTracingClient({
             namespace: "",
             packageName: "@azure/core-rest-pipeline",
-            packageVersion: SDK_VERSION$3,
+            packageVersion: SDK_VERSION$2,
         });
     }
     catch (e) {
-        logger$8.warning(`Error when creating the TracingClient: ${getErrorMessage$1(e)}`);
+        logger$5.warning(`Error when creating the TracingClient: ${getErrorMessage(e)}`);
         return undefined;
     }
 }
-function tryCreateSpan$1(tracingClient, request, spanAttributes) {
+function tryCreateSpan(tracingClient, request, spanAttributes) {
     try {
         // As per spec, we do not need to differentiate between HTTP and HTTPS in span name.
         const { span, updatedOptions } = tracingClient.startSpan(`HTTP ${request.method}`, { tracingOptions: request.tracingOptions }, {
@@ -33362,26 +34531,26 @@ function tryCreateSpan$1(tracingClient, request, spanAttributes) {
         return { span, tracingContext: updatedOptions.tracingOptions.tracingContext };
     }
     catch (e) {
-        logger$8.warning(`Skipping creating a tracing span due to an error: ${getErrorMessage$1(e)}`);
+        logger$5.warning(`Skipping creating a tracing span due to an error: ${getErrorMessage(e)}`);
         return undefined;
     }
 }
-function tryProcessError$1(span, error) {
+function tryProcessError(span, error) {
     try {
         span.setStatus({
             status: "error",
-            error: isError$2(error) ? error : undefined,
+            error: isError(error) ? error : undefined,
         });
-        if (isRestError$2(error) && error.statusCode) {
+        if (isRestError(error) && error.statusCode) {
             span.setAttribute("http.status_code", error.statusCode);
         }
         span.end();
     }
     catch (e) {
-        logger$8.warning(`Skipping tracing span processing due to an error: ${getErrorMessage$1(e)}`);
+        logger$5.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
     }
 }
-function tryProcessResponse$1(span, response) {
+function tryProcessResponse(span, response) {
     try {
         span.setAttribute("http.status_code", response.status);
         const serviceRequestId = response.headers.get("x-ms-request-id");
@@ -33399,7 +34568,7 @@ function tryProcessResponse$1(span, response) {
         span.end();
     }
     catch (e) {
-        logger$8.warning(`Skipping tracing span processing due to an error: ${getErrorMessage$1(e)}`);
+        logger$5.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
     }
 }
 
@@ -33411,12 +34580,14 @@ function tryProcessResponse$1(span, response) {
  * @param abortSignalLike - The AbortSignalLike to wrap.
  * @returns - An object containing the native AbortSignal and an optional cleanup function. The cleanup function should be called when the AbortSignal is no longer needed.
  */
-function wrapAbortSignalLike$1(abortSignalLike) {
+function wrapAbortSignalLike(abortSignalLike) {
     if (abortSignalLike instanceof AbortSignal) {
         return { abortSignal: abortSignalLike };
     }
     if (abortSignalLike.aborted) {
-        return { abortSignal: AbortSignal.abort(abortSignalLike.reason) };
+        return {
+            abortSignal: AbortSignal.abort("reason" in abortSignalLike ? abortSignalLike.reason : undefined),
+        };
     }
     const controller = new AbortController();
     let needsCleanup = true;
@@ -33427,7 +34598,7 @@ function wrapAbortSignalLike$1(abortSignalLike) {
         }
     }
     function listener() {
-        controller.abort(abortSignalLike.reason);
+        controller.abort("reason" in abortSignalLike ? abortSignalLike.reason : undefined);
         cleanup();
     }
     abortSignalLike.addEventListener("abort", listener);
@@ -33436,27 +34607,93 @@ function wrapAbortSignalLike$1(abortSignalLike) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const wrapAbortSignalLikePolicyName$1 = "wrapAbortSignalLikePolicy";
+/**
+ * Runs the cleanup callback associated with the response and its request once they are complete.
+ */
+function cleanupOnRequestResponseCompletion(response, cleanup) {
+    const stream = response?.readableStreamBody;
+    const requestCompletion = response ? getRequestCompletion(response) : undefined;
+    const browserResponseCompletion = response ? getResponseBodyCompletion(response) : undefined;
+    let requestDone = requestCompletion === undefined;
+    let nodeResponseDone = !stream || !stream.readable;
+    let browserResponseDone = browserResponseCompletion === undefined;
+    let cleanedUp = false;
+    const cleanupIfComplete = () => {
+        if (cleanedUp || !requestDone || !nodeResponseDone || !browserResponseDone) {
+            return;
+        }
+        cleanedUp = true;
+        cleanup();
+    };
+    const onResponseComplete = () => {
+        stream?.removeListener("end", onResponseComplete);
+        stream?.removeListener("close", onResponseComplete);
+        stream?.removeListener("error", onResponseComplete);
+        nodeResponseDone = true;
+        try {
+            cleanupIfComplete();
+        }
+        catch (error) {
+            logger$5.warning("Error cleaning up after response stream completion", error);
+        }
+    };
+    if (!nodeResponseDone && stream) {
+        stream.once("end", onResponseComplete);
+        stream.once("close", onResponseComplete);
+        stream.once("error", onResponseComplete);
+    }
+    if (requestCompletion) {
+        requestCompletion
+            .then(() => {
+            requestDone = true;
+            return cleanupIfComplete();
+        })
+            .catch((error) => {
+            logger$5.warning("Error cleaning up after request completion", error);
+        });
+    }
+    if (browserResponseCompletion) {
+        browserResponseCompletion
+            .then(() => {
+            browserResponseDone = true;
+            return cleanupIfComplete();
+        })
+            .catch((error) => {
+            logger$5.warning("Error cleaning up after response body completion", error);
+        });
+    }
+    cleanupIfComplete();
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const wrapAbortSignalLikePolicyName = "wrapAbortSignalLikePolicy";
 /**
  * Policy that ensure that any AbortSignalLike is wrapped in a native AbortSignal for processing by the pipeline.
  * Since the ts-http-runtime expects a native AbortSignal, this policy is used to ensure that any AbortSignalLike is wrapped in a native AbortSignal.
  *
  * @returns - created policy
  */
-function wrapAbortSignalLikePolicy$1() {
+function wrapAbortSignalLikePolicy() {
     return {
-        name: wrapAbortSignalLikePolicyName$1,
+        name: wrapAbortSignalLikePolicyName,
         sendRequest: async (request, next) => {
             if (!request.abortSignal) {
                 return next(request);
             }
-            const { abortSignal, cleanup } = wrapAbortSignalLike$1(request.abortSignal);
+            const originalAbortSignal = request.abortSignal;
+            const { abortSignal, cleanup } = wrapAbortSignalLike(originalAbortSignal);
             request.abortSignal = abortSignal;
+            let response;
             try {
-                return await next(request);
+                response = await next(request);
+                return response;
             }
             finally {
-                cleanup?.();
+                request.abortSignal = originalAbortSignal;
+                if (cleanup) {
+                    cleanupOnRequestResponseCompletion(response, cleanup);
+                }
             }
         },
     };
@@ -33468,36 +34705,36 @@ function wrapAbortSignalLikePolicy$1() {
  * Create a new pipeline with a default set of customizable policies.
  * @param options - Options to configure a custom pipeline.
  */
-function createPipelineFromOptions$1(options) {
-    const pipeline = createEmptyPipeline$2();
-    if (isNodeLike$2) {
+function createPipelineFromOptions(options) {
+    const pipeline = createEmptyPipeline();
+    {
         if (options.agent) {
-            pipeline.addPolicy(agentPolicy$2(options.agent));
+            pipeline.addPolicy(agentPolicy(options.agent));
         }
         if (options.tlsOptions) {
-            pipeline.addPolicy(tlsPolicy$2(options.tlsOptions));
+            pipeline.addPolicy(tlsPolicy(options.tlsOptions));
         }
-        pipeline.addPolicy(proxyPolicy$2(options.proxyOptions));
-        pipeline.addPolicy(decompressResponsePolicy$2());
+        pipeline.addPolicy(proxyPolicy(options.proxyOptions));
+        pipeline.addPolicy(decompressResponsePolicy());
     }
-    pipeline.addPolicy(wrapAbortSignalLikePolicy$1());
-    pipeline.addPolicy(formDataPolicy$2(), { beforePolicies: [multipartPolicyName$2] });
-    pipeline.addPolicy(userAgentPolicy$1(options.userAgentOptions));
-    pipeline.addPolicy(setClientRequestIdPolicy$1(options.telemetryOptions?.clientRequestIdHeaderName));
+    pipeline.addPolicy(wrapAbortSignalLikePolicy());
+    pipeline.addPolicy(formDataPolicy(), { beforePolicies: [multipartPolicyName] });
+    pipeline.addPolicy(userAgentPolicy(options.userAgentOptions));
+    pipeline.addPolicy(setClientRequestIdPolicy(options.telemetryOptions?.clientRequestIdHeaderName));
     // The multipart policy is added after policies with no phase, so that
     // policies can be added between it and formDataPolicy to modify
     // properties (e.g., making the boundary constant in recorded tests).
-    pipeline.addPolicy(multipartPolicy$2(), { afterPhase: "Deserialize" });
-    pipeline.addPolicy(defaultRetryPolicy$2(options.retryOptions), { phase: "Retry" });
-    pipeline.addPolicy(tracingPolicy$1({ ...options.userAgentOptions, ...options.loggingOptions }), {
+    pipeline.addPolicy(multipartPolicy(), { afterPhase: "Deserialize" });
+    pipeline.addPolicy(defaultRetryPolicy(options.retryOptions), { phase: "Retry" });
+    pipeline.addPolicy(tracingPolicy({ ...options.userAgentOptions, ...options.loggingOptions }), {
         afterPhase: "Retry",
     });
-    if (isNodeLike$2) {
+    {
         // Both XHR and Fetch expect to handle redirects automatically,
         // so only include this policy when we're in Node.
-        pipeline.addPolicy(redirectPolicy$2(options.redirectOptions), { afterPhase: "Retry" });
+        pipeline.addPolicy(redirectPolicy(options.redirectOptions), { afterPhase: "Retry" });
     }
-    pipeline.addPolicy(logPolicy$2(options.loggingOptions), { afterPhase: "Sign" });
+    pipeline.addPolicy(logPolicy(options.loggingOptions), { afterPhase: "Sign" });
     return pipeline;
 }
 
@@ -33506,24 +34743,40 @@ function createPipelineFromOptions$1(options) {
 /**
  * Create the correct HttpClient for the current environment.
  */
-function createDefaultHttpClient$2() {
-    const client = createDefaultHttpClient$3();
+function createDefaultHttpClient() {
+    const client = createDefaultHttpClient$1();
     return {
         async sendRequest(request) {
             // we wrap any AbortSignalLike here since the TypeSpec runtime expects a native AbortSignal.
             // 99% of the time, this should be a no-op since a native AbortSignal is passed in.
-            const { abortSignal, cleanup } = request.abortSignal
-                ? wrapAbortSignalLike$1(request.abortSignal)
+            const originalAbortSignal = request.abortSignal;
+            const { abortSignal, cleanup } = originalAbortSignal
+                ? wrapAbortSignalLike(originalAbortSignal)
                 : {};
+            let response;
             try {
                 request.abortSignal = abortSignal;
-                return await client.sendRequest(request);
+                response = await client.sendRequest(request);
+                return response;
             }
             finally {
-                cleanup?.();
+                request.abortSignal = originalAbortSignal;
+                if (cleanup) {
+                    cleanupOnRequestResponseCompletion(response, cleanup);
+                }
             }
         },
     };
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+/**
+ * Creates an object that satisfies the `HttpHeaders` interface.
+ * @param rawHeaders - A simple object representing initial headers
+ */
+function createHttpHeaders(rawHeaders) {
+    return createHttpHeaders$1(rawHeaders);
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33533,17 +34786,17 @@ function createDefaultHttpClient$2() {
  * This method is to allow for the easy setting of default values and not required.
  * @param options - The options to create the request with.
  */
-function createPipelineRequest$2(options) {
+function createPipelineRequest(options) {
     // Cast required due to difference between ts-http-runtime requiring AbortSignal while core-rest-pipeline allows
     // the more generic AbortSignalLike. The wrapAbortSignalLike pipeline policy will take care of ensuring that any AbortSignalLike in the request
     // is converted into a true AbortSignal.
-    return createPipelineRequest$3(options);
+    return createPipelineRequest$1(options);
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 // Default options for the cycler if none are provided
-const DEFAULT_CYCLER_OPTIONS$2 = {
+const DEFAULT_CYCLER_OPTIONS$1 = {
     forcedRefreshWindowInMs: 1000, // Force waiting for a refresh 1s before the token expires
     retryIntervalInMs: 3000, // Allow refresh attempts every 3s
     refreshWindowInMs: 1000 * 60 * 2, // Start refreshing 2m before expiry
@@ -33558,7 +34811,7 @@ const DEFAULT_CYCLER_OPTIONS$2 = {
  * @param refreshTimeout - The timestamp after which the refresh attempt will fail, throwing an exception.
  * @returns - A promise that, if it resolves, will resolve with an access token.
  */
-async function beginRefresh$2(getAccessToken, retryIntervalInMs, refreshTimeout) {
+async function beginRefresh$1(getAccessToken, retryIntervalInMs, refreshTimeout) {
     // This wrapper handles exceptions gracefully as long as we haven't exceeded
     // the timeout.
     async function tryGetAccessToken() {
@@ -33581,7 +34834,7 @@ async function beginRefresh$2(getAccessToken, retryIntervalInMs, refreshTimeout)
     }
     let token = await tryGetAccessToken();
     while (token === null) {
-        await delay$5(retryIntervalInMs);
+        await delay$3(retryIntervalInMs);
         token = await tryGetAccessToken();
     }
     return token;
@@ -33600,12 +34853,12 @@ async function beginRefresh$2(getAccessToken, retryIntervalInMs, refreshTimeout)
  *
  * @returns - a function that reliably produces a valid access token
  */
-function createTokenCycler$2(credential, tokenCyclerOptions) {
+function createTokenCycler$1(credential, tokenCyclerOptions) {
     let refreshWorker = null;
     let token = null;
     let tenantId;
     const options = {
-        ...DEFAULT_CYCLER_OPTIONS$2,
+        ...DEFAULT_CYCLER_OPTIONS$1,
         ...tokenCyclerOptions,
     };
     /**
@@ -33624,13 +34877,16 @@ function createTokenCycler$2(credential, tokenCyclerOptions) {
          * window and not already refreshing)
          */
         get shouldRefresh() {
+            if (token === null) {
+                return true;
+            }
             if (cycler.isRefreshing) {
                 return false;
             }
-            if (token?.refreshAfterTimestamp && token.refreshAfterTimestamp < Date.now()) {
+            if (token.refreshAfterTimestamp && token.refreshAfterTimestamp < Date.now()) {
                 return true;
             }
-            return (token?.expiresOnTimestamp ?? 0) - options.refreshWindowInMs < Date.now();
+            return token.expiresOnTimestamp - options.refreshWindowInMs < Date.now();
         },
         /**
          * Produces true if the cycler MUST refresh (null or nearly-expired
@@ -33650,7 +34906,7 @@ function createTokenCycler$2(credential, tokenCyclerOptions) {
             const tryGetAccessToken = () => credential.getToken(scopes, getTokenOptions);
             // Take advantage of promise chaining to insert an assignment to `token`
             // before the refresh can be considered done.
-            refreshWorker = beginRefresh$2(tryGetAccessToken, options.retryIntervalInMs, 
+            refreshWorker = beginRefresh$1(tryGetAccessToken, options.retryIntervalInMs, 
             // If we don't have a token, then we should timeout immediately
             token?.expiresOnTimestamp ?? Date.now())
                 .then((_token) => {
@@ -33707,7 +34963,7 @@ function createTokenCycler$2(credential, tokenCyclerOptions) {
 /**
  * The programmatic identifier of the bearerTokenAuthenticationPolicy.
  */
-const bearerTokenAuthenticationPolicyName$1 = "bearerTokenAuthenticationPolicy";
+const bearerTokenAuthenticationPolicyName = "bearerTokenAuthenticationPolicy";
 /**
  * Try to send the given request.
  *
@@ -33717,12 +34973,12 @@ const bearerTokenAuthenticationPolicyName$1 = "bearerTokenAuthenticationPolicy";
  * Otherwise, if an error was thrown while sending the request that did not provide an underlying response, it
  * will be rethrown.
  */
-async function trySendRequest$1(request, next) {
+async function trySendRequest(request, next) {
     try {
         return [await next(request), undefined];
     }
     catch (e) {
-        if (isRestError$2(e) && e.response) {
+        if (isRestError(e) && e.response) {
             return [e.response, e];
         }
         else {
@@ -33733,7 +34989,7 @@ async function trySendRequest$1(request, next) {
 /**
  * Default authorize request handler
  */
-async function defaultAuthorizeRequest$1(options) {
+async function defaultAuthorizeRequest(options) {
     const { scopes, getAccessToken, request } = options;
     // Enable CAE true by default
     const getTokenOptions = {
@@ -33750,7 +35006,7 @@ async function defaultAuthorizeRequest$1(options) {
  * We will retrieve the challenge only if the response status code was 401,
  * and if the response contained the header "WWW-Authenticate" with a non-empty value.
  */
-function isChallengeResponse$1(response) {
+function isChallengeResponse(response) {
     return response.status === 401 && response.headers.has("WWW-Authenticate");
 }
 /**
@@ -33758,7 +35014,7 @@ function isChallengeResponse$1(response) {
  * The response containing the challenge is `options.response`.
  * If this method returns true, the underlying request will be sent once again.
  */
-async function authorizeRequestOnCaeChallenge$1(onChallengeOptions, caeClaims) {
+async function authorizeRequestOnCaeChallenge(onChallengeOptions, caeClaims) {
     const { scopes } = onChallengeOptions;
     const accessToken = await onChallengeOptions.getAccessToken(scopes, {
         enableCae: true,
@@ -33774,11 +35030,11 @@ async function authorizeRequestOnCaeChallenge$1(onChallengeOptions, caeClaims) {
  * A policy that can request a token from a TokenCredential implementation and
  * then apply it to the Authorization header of a request as a Bearer token.
  */
-function bearerTokenAuthenticationPolicy$1(options) {
+function bearerTokenAuthenticationPolicy(options) {
     const { credential, scopes, challengeCallbacks } = options;
-    const logger = options.logger || logger$8;
+    const logger = options.logger || logger$5;
     const callbacks = {
-        authorizeRequest: challengeCallbacks?.authorizeRequest?.bind(challengeCallbacks) ?? defaultAuthorizeRequest$1,
+        authorizeRequest: challengeCallbacks?.authorizeRequest?.bind(challengeCallbacks) ?? defaultAuthorizeRequest,
         authorizeRequestOnChallenge: challengeCallbacks?.authorizeRequestOnChallenge?.bind(challengeCallbacks),
     };
     // This function encapsulates the entire process of reliably retrieving the token
@@ -33786,10 +35042,10 @@ function bearerTokenAuthenticationPolicy$1(options) {
     // Remember to extend `BearerTokenAuthenticationPolicyOptions` with `TokenCyclerOptions`
     // in order to pass through the `options` object.
     const getAccessToken = credential
-        ? createTokenCycler$2(credential /* , options */)
+        ? createTokenCycler$1(credential /* , options */)
         : () => Promise.resolve(null);
     return {
-        name: bearerTokenAuthenticationPolicyName$1,
+        name: bearerTokenAuthenticationPolicyName,
         /**
          * If there's no challenge parameter:
          * - It will try to retrieve the token using the cache, or the credential's getToken.
@@ -33816,9 +35072,9 @@ function bearerTokenAuthenticationPolicy$1(options) {
             let response;
             let error;
             let shouldSendRequest;
-            [response, error] = await trySendRequest$1(request, next);
-            if (isChallengeResponse$1(response)) {
-                let claims = getCaeChallengeClaims$1(response.headers.get("WWW-Authenticate"));
+            [response, error] = await trySendRequest(request, next);
+            if (isChallengeResponse(response)) {
+                let claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate"));
                 // Handle CAE by default when receive CAE claim
                 if (claims) {
                     let parsedClaim;
@@ -33830,7 +35086,7 @@ function bearerTokenAuthenticationPolicy$1(options) {
                         logger.warning(`The WWW-Authenticate header contains "claims" that cannot be parsed. Unable to perform the Continuous Access Evaluation authentication flow. Unparsable claims: ${claims}`);
                         return response;
                     }
-                    shouldSendRequest = await authorizeRequestOnCaeChallenge$1({
+                    shouldSendRequest = await authorizeRequestOnCaeChallenge({
                         scopes: Array.isArray(scopes) ? scopes : [scopes],
                         response,
                         request,
@@ -33839,7 +35095,8 @@ function bearerTokenAuthenticationPolicy$1(options) {
                     }, parsedClaim);
                     // Send updated request and handle response for RestError
                     if (shouldSendRequest) {
-                        [response, error] = await trySendRequest$1(request, next);
+                        await disposeResponseBody(response);
+                        [response, error] = await trySendRequest(request, next);
                     }
                 }
                 else if (callbacks.authorizeRequestOnChallenge) {
@@ -33853,11 +35110,12 @@ function bearerTokenAuthenticationPolicy$1(options) {
                     });
                     // Send updated request and handle response for RestError
                     if (shouldSendRequest) {
-                        [response, error] = await trySendRequest$1(request, next);
+                        await disposeResponseBody(response);
+                        [response, error] = await trySendRequest(request, next);
                     }
                     // If we get another CAE Claim, we will handle it by default and return whatever value we receive for this
-                    if (isChallengeResponse$1(response)) {
-                        claims = getCaeChallengeClaims$1(response.headers.get("WWW-Authenticate"));
+                    if (isChallengeResponse(response)) {
+                        claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate") ?? "");
                         if (claims) {
                             let parsedClaim;
                             try {
@@ -33867,7 +35125,7 @@ function bearerTokenAuthenticationPolicy$1(options) {
                                 logger.warning(`The WWW-Authenticate header contains "claims" that cannot be parsed. Unable to perform the Continuous Access Evaluation authentication flow. Unparsable claims: ${claims}`);
                                 return response;
                             }
-                            shouldSendRequest = await authorizeRequestOnCaeChallenge$1({
+                            shouldSendRequest = await authorizeRequestOnCaeChallenge({
                                 scopes: Array.isArray(scopes) ? scopes : [scopes],
                                 response,
                                 request,
@@ -33876,7 +35134,8 @@ function bearerTokenAuthenticationPolicy$1(options) {
                             }, parsedClaim);
                             // Send updated request and handle response for RestError
                             if (shouldSendRequest) {
-                                [response, error] = await trySendRequest$1(request, next);
+                                await disposeResponseBody(response);
+                                [response, error] = await trySendRequest(request, next);
                             }
                         }
                     }
@@ -33897,7 +35156,7 @@ function bearerTokenAuthenticationPolicy$1(options) {
  *
  * @internal
  */
-function parseChallenges$1(challenges) {
+function parseChallenges(challenges) {
     // Challenge regex seperates the string to individual challenges with different schemes in the format `Scheme a="b", c=d`
     // The challenge regex captures parameteres with either quotes values or unquoted values
     const challengeRegex = /(\w+)\s+((?:\w+=(?:"[^"]*"|[^,]*),?\s*)+)/g;
@@ -33925,32 +35184,26 @@ function parseChallenges$1(challenges) {
  * Return the value in the header without parsing the challenge
  * @internal
  */
-function getCaeChallengeClaims$1(challenges) {
+function getCaeChallengeClaims(challenges) {
     if (!challenges) {
         return;
     }
     // Find all challenges present in the header
-    const parsedChallenges = parseChallenges$1(challenges);
+    const parsedChallenges = parseChallenges(challenges);
     return parsedChallenges.find((x) => x.scheme === "Bearer" && x.params.claims && x.params.error === "insufficient_claims")?.params.claims;
 }
 
-const logger$7 = createClientLogger$2("container-registry");
+const logger$4 = createClientLogger("container-registry");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
- * Encodes a string in base64 format.
- * @param value - the string to encode
- * @internal
- */
-/**
  * Encodes a byte array in base64 format.
- * @param value - the Uint8Aray to encode
+ * @param value - the Uint8Array to encode
  * @internal
  */
 function encodeByteArray(value) {
-    const bufferValue = value instanceof Buffer ? value : Buffer.from(value.buffer);
-    return bufferValue.toString("base64");
+    return uint8ArrayToString(value, "base64");
 }
 /**
  * Decodes a base64 string into a byte array.
@@ -33958,7 +35211,7 @@ function encodeByteArray(value) {
  * @internal
  */
 function decodeString(value) {
-    return Buffer.from(value, "base64");
+    return stringToUint8Array(value, "base64");
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -33966,11 +35219,11 @@ function decodeString(value) {
 /**
  * Default key used to access the XML attributes.
  */
-const XML_ATTRKEY$1 = "$";
+const XML_ATTRKEY = "$";
 /**
  * Default key used to access the XML value content.
  */
-const XML_CHARKEY$1 = "_";
+const XML_CHARKEY = "_";
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -33980,7 +35233,7 @@ const XML_CHARKEY$1 = "_";
  *
  * @internal
  */
-function isPrimitiveBody$1(value, mapperTypeName) {
+function isPrimitiveBody(value, mapperTypeName) {
     return (mapperTypeName !== "Composite" &&
         mapperTypeName !== "Dictionary" &&
         (typeof value === "string" ||
@@ -34022,7 +35275,7 @@ function isValidUuid(uuid) {
  *
  * @internal
  */
-function handleNullableResponseAndWrappableBody$1(responseObject) {
+function handleNullableResponseAndWrappableBody(responseObject) {
     const combinedHeadersAndBody = {
         ...responseObject.headers,
         ...responseObject.body,
@@ -34048,7 +35301,7 @@ function handleNullableResponseAndWrappableBody$1(responseObject) {
  *
  * @internal
  */
-function flattenResponse$1(fullResponse, responseSpec) {
+function flattenResponse(fullResponse, responseSpec) {
     const parsedHeaders = fullResponse.parsedHeaders;
     // head methods never have a body, but we return a boolean set to body property
     // to indicate presence/absence of the resource
@@ -34092,11 +35345,11 @@ function flattenResponse$1(fullResponse, responseSpec) {
             ? null
             : arrayResponse;
     }
-    return handleNullableResponseAndWrappableBody$1({
+    return handleNullableResponseAndWrappableBody({
         body: fullResponse.parsedBody,
         headers: parsedHeaders,
         hasNullableType: isNullable,
-        shouldWrapBody: isPrimitiveBody$1(fullResponse.parsedBody, expectedBodyTypeName),
+        shouldWrapBody: isPrimitiveBody(fullResponse.parsedBody, expectedBodyTypeName),
     });
 }
 
@@ -34175,7 +35428,7 @@ class SerializerImpl {
             xml: {
                 rootName: options.xml.rootName ?? "",
                 includeRoot: options.xml.includeRoot ?? false,
-                xmlCharKey: options.xml.xmlCharKey ?? XML_CHARKEY$1,
+                xmlCharKey: options.xml.xmlCharKey ?? XML_CHARKEY,
             },
         };
         let payload = {};
@@ -34261,7 +35514,7 @@ class SerializerImpl {
             xml: {
                 rootName: options.xml.rootName ?? "",
                 includeRoot: options.xml.includeRoot ?? false,
-                xmlCharKey: options.xml.xmlCharKey ?? XML_CHARKEY$1,
+                xmlCharKey: options.xml.xmlCharKey ?? XML_CHARKEY,
             },
             ignoreUnknownProperties: options.ignoreUnknownProperties ?? false,
         };
@@ -34294,7 +35547,7 @@ class SerializerImpl {
                  * both header ("$" i.e., XML_ATTRKEY) and body ("#" i.e., XML_CHARKEY) properties,
                  * then just reduce the responseBody value to the body ("#" i.e., XML_CHARKEY) property.
                  */
-                if (responseBody[XML_ATTRKEY$1] !== undefined && responseBody[xmlCharKey] !== undefined) {
+                if (responseBody[XML_ATTRKEY] !== undefined && responseBody[xmlCharKey] !== undefined) {
                     responseBody = responseBody[xmlCharKey];
                 }
             }
@@ -34534,8 +35787,8 @@ function serializeSequenceType(serializer, mapper, object, objectName, isXml, op
     }
     let elementType = mapper.type.element;
     if (!elementType || typeof elementType !== "object") {
-        throw new Error(`element" metadata for an Array must be defined in the ` +
-            `mapper and it must of type "object" in ${objectName}.`);
+        throw new Error(`"element" metadata for an Array must be defined in the ` +
+            `mapper and it must be of type "object" in ${objectName}.`);
     }
     // Quirk: Composite mappers referenced by `element` might
     // not have *all* properties declared (like uberParent),
@@ -34552,12 +35805,12 @@ function serializeSequenceType(serializer, mapper, object, objectName, isXml, op
                 : "xmlns";
             if (elementType.type.name === "Composite") {
                 tempArray[i] = { ...serializedValue };
-                tempArray[i][XML_ATTRKEY$1] = { [xmlnsKey]: elementType.xmlNamespace };
+                tempArray[i][XML_ATTRKEY] = { [xmlnsKey]: elementType.xmlNamespace };
             }
             else {
                 tempArray[i] = {};
                 tempArray[i][options.xml.xmlCharKey] = serializedValue;
-                tempArray[i][XML_ATTRKEY$1] = { [xmlnsKey]: elementType.xmlNamespace };
+                tempArray[i][XML_ATTRKEY] = { [xmlnsKey]: elementType.xmlNamespace };
             }
         }
         else {
@@ -34579,13 +35832,18 @@ function serializeDictionaryType(serializer, mapper, object, objectName, isXml, 
     for (const key of Object.keys(object)) {
         const serializedValue = serializer.serialize(valueType, object[key], objectName, options);
         // If the element needs an XML namespace we need to add it within the $ property
-        tempDictionary[key] = getXmlObjectValue(valueType, serializedValue, isXml, options);
+        Object.defineProperty(tempDictionary, key, {
+            value: getXmlObjectValue(valueType, serializedValue, isXml, options),
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
     }
     // Add the namespace to the root element if needed
     if (isXml && mapper.xmlNamespace) {
         const xmlnsKey = mapper.xmlNamespacePrefix ? `xmlns:${mapper.xmlNamespacePrefix}` : "xmlns";
         const result = tempDictionary;
-        result[XML_ATTRKEY$1] = { [xmlnsKey]: mapper.xmlNamespace };
+        result[XML_ATTRKEY] = { [xmlnsKey]: mapper.xmlNamespace };
         return result;
     }
     return tempDictionary;
@@ -34677,8 +35935,8 @@ function serializeCompositeType(serializer, mapper, object, objectName, isXml, o
                     const xmlnsKey = mapper.xmlNamespacePrefix
                         ? `xmlns:${mapper.xmlNamespacePrefix}`
                         : "xmlns";
-                    parentObject[XML_ATTRKEY$1] = {
-                        ...parentObject[XML_ATTRKEY$1],
+                    parentObject[XML_ATTRKEY] = {
+                        ...parentObject[XML_ATTRKEY],
                         [xmlnsKey]: mapper.xmlNamespace,
                     };
                 }
@@ -34699,8 +35957,8 @@ function serializeCompositeType(serializer, mapper, object, objectName, isXml, o
                         // XML_ATTRKEY, i.e., $ is the key attributes are kept under in xml2js.
                         // This keeps things simple while preventing name collision
                         // with names in user documents.
-                        parentObject[XML_ATTRKEY$1] = parentObject[XML_ATTRKEY$1] || {};
-                        parentObject[XML_ATTRKEY$1][propName] = serializedValue;
+                        parentObject[XML_ATTRKEY] = parentObject[XML_ATTRKEY] || {};
+                        parentObject[XML_ATTRKEY][propName] = serializedValue;
                     }
                     else if (isXml && propertyMapper.xmlIsWrapped) {
                         parentObject[propName] = { [propertyMapper.xmlElementName]: value };
@@ -34714,10 +35972,15 @@ function serializeCompositeType(serializer, mapper, object, objectName, isXml, o
         const additionalPropertiesMapper = resolveAdditionalProperties(serializer, mapper, objectName);
         if (additionalPropertiesMapper) {
             const propNames = Object.keys(modelProps);
-            for (const clientPropName in object) {
+            for (const clientPropName of Object.keys(object)) {
                 const isAdditionalProperty = propNames.every((pn) => pn !== clientPropName);
                 if (isAdditionalProperty) {
-                    payload[clientPropName] = serializer.serialize(additionalPropertiesMapper, object[clientPropName], objectName + '["' + clientPropName + '"]', options);
+                    Object.defineProperty(payload, clientPropName, {
+                        value: serializer.serialize(additionalPropertiesMapper, object[clientPropName], objectName + '["' + clientPropName + '"]', options),
+                        enumerable: true,
+                        configurable: true,
+                        writable: true,
+                    });
                 }
             }
         }
@@ -34734,25 +35997,25 @@ function getXmlObjectValue(propertyMapper, serializedValue, isXml, options) {
         : "xmlns";
     const xmlNamespace = { [xmlnsKey]: propertyMapper.xmlNamespace };
     if (["Composite"].includes(propertyMapper.type.name)) {
-        if (serializedValue[XML_ATTRKEY$1]) {
+        if (serializedValue[XML_ATTRKEY]) {
             return serializedValue;
         }
         else {
             const result = { ...serializedValue };
-            result[XML_ATTRKEY$1] = xmlNamespace;
+            result[XML_ATTRKEY] = xmlNamespace;
             return result;
         }
     }
     const result = {};
     result[options.xml.xmlCharKey] = serializedValue;
-    result[XML_ATTRKEY$1] = xmlNamespace;
+    result[XML_ATTRKEY] = xmlNamespace;
     return result;
 }
 function isSpecialXmlProperty(propertyName, options) {
-    return [XML_ATTRKEY$1, options.xml.xmlCharKey].includes(propertyName);
+    return [XML_ATTRKEY, options.xml.xmlCharKey].includes(propertyName);
 }
 function deserializeCompositeType(serializer, mapper, responseBody, objectName, options) {
-    const xmlCharKey = options.xml.xmlCharKey ?? XML_CHARKEY$1;
+    const xmlCharKey = options.xml.xmlCharKey ?? XML_CHARKEY;
     if (getPolymorphicDiscriminatorRecursively(serializer, mapper)) {
         mapper = getPolymorphicMapper(serializer, mapper, responseBody, "serializedName");
     }
@@ -34773,15 +36036,20 @@ function deserializeCompositeType(serializer, mapper, responseBody, objectName, 
             const dictionary = {};
             for (const headerKey of Object.keys(responseBody)) {
                 if (headerKey.startsWith(headerCollectionPrefix)) {
-                    dictionary[headerKey.substring(headerCollectionPrefix.length)] = serializer.deserialize(propertyMapper.type.value, responseBody[headerKey], propertyObjectName, options);
+                    Object.defineProperty(dictionary, headerKey.substring(headerCollectionPrefix.length), {
+                        value: serializer.deserialize(propertyMapper.type.value, responseBody[headerKey], propertyObjectName, options),
+                        enumerable: true,
+                        configurable: true,
+                        writable: true,
+                    });
                 }
                 handledPropertyNames.push(headerKey);
             }
             instance[key] = dictionary;
         }
         else if (serializer.isXML) {
-            if (propertyMapper.xmlIsAttribute && responseBody[XML_ATTRKEY$1]) {
-                instance[key] = serializer.deserialize(propertyMapper, responseBody[XML_ATTRKEY$1][xmlName], propertyObjectName, options);
+            if (propertyMapper.xmlIsAttribute && responseBody[XML_ATTRKEY]) {
+                instance[key] = serializer.deserialize(propertyMapper, responseBody[XML_ATTRKEY][xmlName], propertyObjectName, options);
             }
             else if (propertyMapper.xmlIsMsText) {
                 if (responseBody[xmlCharKey] !== undefined) {
@@ -34812,7 +36080,12 @@ function deserializeCompositeType(serializer, mapper, responseBody, objectName, 
                     */
                     const wrapped = responseBody[xmlName];
                     const elementList = wrapped?.[xmlElementName] ?? [];
-                    instance[key] = serializer.deserialize(propertyMapper, elementList, propertyObjectName, options);
+                    Object.defineProperty(instance, key, {
+                        value: serializer.deserialize(propertyMapper, elementList, propertyObjectName, options),
+                        enumerable: true,
+                        configurable: true,
+                        writable: true,
+                    });
                     handledPropertyNames.push(xmlName);
                 }
                 else {
@@ -34877,7 +36150,7 @@ function deserializeCompositeType(serializer, mapper, responseBody, objectName, 
     const additionalPropertiesMapper = mapper.type.additionalProperties;
     if (additionalPropertiesMapper) {
         const isAdditionalProperty = (responsePropName) => {
-            for (const clientPropName in modelProps) {
+            for (const clientPropName of Object.keys(modelProps)) {
                 const paths = splitSerializeName(modelProps[clientPropName].serializedName);
                 if (paths[0] === responsePropName) {
                     return false;
@@ -34885,9 +36158,15 @@ function deserializeCompositeType(serializer, mapper, responseBody, objectName, 
             }
             return true;
         };
-        for (const responsePropName in responseBody) {
+        for (const responsePropName of Object.keys(responseBody)) {
             if (isAdditionalProperty(responsePropName)) {
-                instance[responsePropName] = serializer.deserialize(additionalPropertiesMapper, responseBody[responsePropName], objectName + '["' + responsePropName + '"]', options);
+                const deserializedValue = serializer.deserialize(additionalPropertiesMapper, responseBody[responsePropName], objectName + '["' + responsePropName + '"]', options);
+                Object.defineProperty(instance, responsePropName, {
+                    value: deserializedValue,
+                    enumerable: true,
+                    configurable: true,
+                    writable: true,
+                });
             }
         }
     }
@@ -34896,7 +36175,12 @@ function deserializeCompositeType(serializer, mapper, responseBody, objectName, 
             if (instance[key] === undefined &&
                 !handledPropertyNames.includes(key) &&
                 !isSpecialXmlProperty(key, options)) {
-                instance[key] = responseBody[key];
+                Object.defineProperty(instance, key, {
+                    value: responseBody[key],
+                    enumerable: true,
+                    configurable: true,
+                    writable: true,
+                });
             }
         }
     }
@@ -34912,7 +36196,12 @@ function deserializeDictionaryType(serializer, mapper, responseBody, objectName,
     if (responseBody) {
         const tempDictionary = {};
         for (const key of Object.keys(responseBody)) {
-            tempDictionary[key] = serializer.deserialize(value, responseBody[key], objectName, options);
+            Object.defineProperty(tempDictionary, key, {
+                value: serializer.deserialize(value, responseBody[key], objectName, options),
+                enumerable: true,
+                configurable: true,
+                writable: true,
+            });
         }
         return tempDictionary;
     }
@@ -34921,8 +36210,8 @@ function deserializeDictionaryType(serializer, mapper, responseBody, objectName,
 function deserializeSequenceType(serializer, mapper, responseBody, objectName, options) {
     let element = mapper.type.element;
     if (!element || typeof element !== "object") {
-        throw new Error(`element" metadata for an Array must be defined in the ` +
-            `mapper and it must of type "object" in ${objectName}`);
+        throw new Error(`"element" metadata for an Array must be defined in the ` +
+            `mapper and it must be of type "object" in ${objectName}`);
     }
     if (responseBody) {
         if (!Array.isArray(responseBody)) {
@@ -34999,7 +36288,7 @@ function getPolymorphicDiscriminatorSafely(serializer, typeName) {
 /**
  * Known types of Mappers
  */
-const MapperTypeNames$1 = {
+const MapperTypeNames = {
     Base64Url: "Base64Url",
     Boolean: "Boolean",
     ByteArray: "ByteArray",
@@ -35018,28 +36307,28 @@ const MapperTypeNames$1 = {
     UnixTime: "UnixTime",
 };
 
-var state$3 = {};
+var stateCjs = {};
 
-var hasRequiredState;
+var hasRequiredStateCjs;
 
-function requireState () {
-	if (hasRequiredState) return state$3;
-	hasRequiredState = 1;
+function requireStateCjs () {
+	if (hasRequiredStateCjs) return stateCjs;
+	hasRequiredStateCjs = 1;
 	// Copyright (c) Microsoft Corporation.
 	// Licensed under the MIT License.
-	Object.defineProperty(state$3, "__esModule", { value: true });
-	state$3.state = void 0;
+	Object.defineProperty(stateCjs, "__esModule", { value: true });
+	stateCjs.state = void 0;
 	/**
 	 * Holds the singleton operationRequestMap, to be shared across CJS and ESM imports.
 	 */
-	state$3.state = {
+	stateCjs.state = {
 	    operationRequestMap: new WeakMap(),
 	};
 	
-	return state$3;
+	return stateCjs;
 }
 
-var stateExports = requireState();
+var stateCjsExports = requireStateCjs();
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -35048,7 +36337,7 @@ var stateExports = requireState();
 /**
  * Defines the shared state between CJS and ESM by re-exporting the CJS state.
  */
-const state$2 = stateExports.state;
+const state = stateCjsExports.state;
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -35060,7 +36349,7 @@ const state$2 = stateExports.state;
  * @param fallbackObject - If something isn't found in the arguments bag, look here.
  *  Generally used to look at the service client properties.
  */
-function getOperationArgumentValueFromParameter$1(operationArguments, parameter, fallbackObject) {
+function getOperationArgumentValueFromParameter(operationArguments, parameter, fallbackObject) {
     let parameterPath = parameter.parameterPath;
     const parameterMapper = parameter.mapper;
     let value;
@@ -35073,9 +36362,9 @@ function getOperationArgumentValueFromParameter$1(operationArguments, parameter,
                 value = parameterMapper.defaultValue;
             }
             else {
-                let propertySearchResult = getPropertyFromParameterPath$1(operationArguments, parameterPath);
+                let propertySearchResult = getPropertyFromParameterPath(operationArguments, parameterPath);
                 if (!propertySearchResult.propertyFound && fallbackObject) {
-                    propertySearchResult = getPropertyFromParameterPath$1(fallbackObject, parameterPath);
+                    propertySearchResult = getPropertyFromParameterPath(fallbackObject, parameterPath);
                 }
                 let useDefaultValue = false;
                 if (!propertySearchResult.propertyFound) {
@@ -35091,10 +36380,9 @@ function getOperationArgumentValueFromParameter$1(operationArguments, parameter,
         if (parameterMapper.required) {
             value = {};
         }
-        for (const propertyName in parameterPath) {
+        for (const [propertyName, propertyPath] of Object.entries(parameterPath)) {
             const propertyMapper = parameterMapper.type.modelProperties[propertyName];
-            const propertyPath = parameterPath[propertyName];
-            const propertyValue = getOperationArgumentValueFromParameter$1(operationArguments, {
+            const propertyValue = getOperationArgumentValueFromParameter(operationArguments, {
                 parameterPath: propertyPath,
                 mapper: propertyMapper,
             }, fallbackObject);
@@ -35102,13 +36390,18 @@ function getOperationArgumentValueFromParameter$1(operationArguments, parameter,
                 if (!value) {
                     value = {};
                 }
-                value[propertyName] = propertyValue;
+                Object.defineProperty(value, propertyName, {
+                    value: propertyValue,
+                    enumerable: true,
+                    configurable: true,
+                    writable: true,
+                });
             }
         }
     }
     return value;
 }
-function getPropertyFromParameterPath$1(parent, parameterPath) {
+function getPropertyFromParameterPath(parent, parameterPath) {
     const result = { propertyFound: false };
     let i = 0;
     for (; i < parameterPath.length; ++i) {
@@ -35127,57 +36420,57 @@ function getPropertyFromParameterPath$1(parent, parameterPath) {
     }
     return result;
 }
-const originalRequestSymbol$1 = Symbol.for("@azure/core-client original request");
-function hasOriginalRequest$1(request) {
-    return originalRequestSymbol$1 in request;
+const originalRequestSymbol = Symbol.for("@azure/core-client original request");
+function hasOriginalRequest(request) {
+    return originalRequestSymbol in request;
 }
-function getOperationRequestInfo$1(request) {
-    if (hasOriginalRequest$1(request)) {
-        return getOperationRequestInfo$1(request[originalRequestSymbol$1]);
+function getOperationRequestInfo(request) {
+    if (hasOriginalRequest(request)) {
+        return getOperationRequestInfo(request[originalRequestSymbol]);
     }
-    let info = state$2.operationRequestMap.get(request);
+    let info = state.operationRequestMap.get(request);
     if (!info) {
         info = {};
-        state$2.operationRequestMap.set(request, info);
+        state.operationRequestMap.set(request, info);
     }
     return info;
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const defaultJsonContentTypes$1 = ["application/json", "text/json"];
-const defaultXmlContentTypes$1 = ["application/xml", "application/atom+xml"];
+const defaultJsonContentTypes = ["application/json", "text/json"];
+const defaultXmlContentTypes = ["application/xml", "application/atom+xml"];
 /**
  * The programmatic identifier of the deserializationPolicy.
  */
-const deserializationPolicyName$1 = "deserializationPolicy";
+const deserializationPolicyName = "deserializationPolicy";
 /**
  * This policy handles parsing out responses according to OperationSpecs on the request.
  */
-function deserializationPolicy$1(options = {}) {
-    const jsonContentTypes = options.expectedContentTypes?.json ?? defaultJsonContentTypes$1;
-    const xmlContentTypes = options.expectedContentTypes?.xml ?? defaultXmlContentTypes$1;
+function deserializationPolicy(options = {}) {
+    const jsonContentTypes = options.expectedContentTypes?.json ?? defaultJsonContentTypes;
+    const xmlContentTypes = options.expectedContentTypes?.xml ?? defaultXmlContentTypes;
     const parseXML = options.parseXML;
     const serializerOptions = options.serializerOptions;
     const updatedOptions = {
         xml: {
             rootName: serializerOptions?.xml.rootName ?? "",
             includeRoot: serializerOptions?.xml.includeRoot ?? false,
-            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY$1,
+            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY,
         },
     };
     return {
-        name: deserializationPolicyName$1,
+        name: deserializationPolicyName,
         async sendRequest(request, next) {
             const response = await next(request);
-            return deserializeResponseBody$1(jsonContentTypes, xmlContentTypes, response, updatedOptions, parseXML);
+            return deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, updatedOptions, parseXML);
         },
     };
 }
-function getOperationResponseMap$1(parsedResponse) {
+function getOperationResponseMap(parsedResponse) {
     let result;
     const request = parsedResponse.request;
-    const operationInfo = getOperationRequestInfo$1(request);
+    const operationInfo = getOperationRequestInfo(request);
     const operationSpec = operationInfo?.operationSpec;
     if (operationSpec) {
         if (!operationInfo?.operationResponseGetter) {
@@ -35189,9 +36482,9 @@ function getOperationResponseMap$1(parsedResponse) {
     }
     return result;
 }
-function shouldDeserializeResponse$1(parsedResponse) {
+function shouldDeserializeResponse(parsedResponse) {
     const request = parsedResponse.request;
-    const operationInfo = getOperationRequestInfo$1(request);
+    const operationInfo = getOperationRequestInfo(request);
     const shouldDeserialize = operationInfo?.shouldDeserialize;
     let result;
     if (shouldDeserialize === undefined) {
@@ -35205,18 +36498,18 @@ function shouldDeserializeResponse$1(parsedResponse) {
     }
     return result;
 }
-async function deserializeResponseBody$1(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-    const parsedResponse = await parse$1(jsonContentTypes, xmlContentTypes, response, options, parseXML);
-    if (!shouldDeserializeResponse$1(parsedResponse)) {
+async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
+    const parsedResponse = await parse(jsonContentTypes, xmlContentTypes, response, options, parseXML);
+    if (!shouldDeserializeResponse(parsedResponse)) {
         return parsedResponse;
     }
-    const operationInfo = getOperationRequestInfo$1(parsedResponse.request);
+    const operationInfo = getOperationRequestInfo(parsedResponse.request);
     const operationSpec = operationInfo?.operationSpec;
     if (!operationSpec || !operationSpec.responses) {
         return parsedResponse;
     }
-    const responseSpec = getOperationResponseMap$1(parsedResponse);
-    const { error, shouldReturnResponse } = handleErrorResponse$1(parsedResponse, operationSpec, responseSpec, options);
+    const responseSpec = getOperationResponseMap(parsedResponse);
+    const { error, shouldReturnResponse } = handleErrorResponse(parsedResponse, operationSpec, responseSpec, options);
     if (error) {
         throw error;
     }
@@ -35228,7 +36521,7 @@ async function deserializeResponseBody$1(jsonContentTypes, xmlContentTypes, resp
     if (responseSpec) {
         if (responseSpec.bodyMapper) {
             let valueToDeserialize = parsedResponse.parsedBody;
-            if (operationSpec.isXML && responseSpec.bodyMapper.type.name === MapperTypeNames$1.Sequence) {
+            if (operationSpec.isXML && responseSpec.bodyMapper.type.name === MapperTypeNames.Sequence) {
                 valueToDeserialize =
                     typeof valueToDeserialize === "object"
                         ? valueToDeserialize[responseSpec.bodyMapper.xmlElementName]
@@ -35238,7 +36531,7 @@ async function deserializeResponseBody$1(jsonContentTypes, xmlContentTypes, resp
                 parsedResponse.parsedBody = operationSpec.serializer.deserialize(responseSpec.bodyMapper, valueToDeserialize, "operationRes.parsedBody", options);
             }
             catch (deserializeError) {
-                const restError = new RestError$2(`Error ${deserializeError} occurred in deserializing the responseBody - ${parsedResponse.bodyAsText}`, {
+                const restError = new RestError(`Error ${deserializeError} occurred in deserializing the responseBody - ${parsedResponse.bodyAsText}`, {
                     statusCode: parsedResponse.status,
                     request: parsedResponse.request,
                     response: parsedResponse,
@@ -35256,14 +36549,14 @@ async function deserializeResponseBody$1(jsonContentTypes, xmlContentTypes, resp
     }
     return parsedResponse;
 }
-function isOperationSpecEmpty$1(operationSpec) {
+function isOperationSpecEmpty(operationSpec) {
     const expectedStatusCodes = Object.keys(operationSpec.responses);
     return (expectedStatusCodes.length === 0 ||
         (expectedStatusCodes.length === 1 && expectedStatusCodes[0] === "default"));
 }
-function handleErrorResponse$1(parsedResponse, operationSpec, responseSpec, options) {
+function handleErrorResponse(parsedResponse, operationSpec, responseSpec, options) {
     const isSuccessByStatus = 200 <= parsedResponse.status && parsedResponse.status < 300;
-    const isExpectedStatusCode = isOperationSpecEmpty$1(operationSpec)
+    const isExpectedStatusCode = isOperationSpecEmpty(operationSpec)
         ? isSuccessByStatus
         : !!responseSpec;
     if (isExpectedStatusCode) {
@@ -35280,7 +36573,7 @@ function handleErrorResponse$1(parsedResponse, operationSpec, responseSpec, opti
     const initialErrorMessage = parsedResponse.request.streamResponseStatusCodes?.has(parsedResponse.status)
         ? `Unexpected status code: ${parsedResponse.status}`
         : parsedResponse.bodyAsText;
-    const error = new RestError$2(initialErrorMessage, {
+    const error = new RestError(initialErrorMessage, {
         statusCode: parsedResponse.status,
         request: parsedResponse.request,
         response: parsedResponse,
@@ -35302,7 +36595,7 @@ function handleErrorResponse$1(parsedResponse, operationSpec, responseSpec, opti
             let deserializedError;
             if (defaultBodyMapper) {
                 let valueToDeserialize = parsedBody;
-                if (operationSpec.isXML && defaultBodyMapper.type.name === MapperTypeNames$1.Sequence) {
+                if (operationSpec.isXML && defaultBodyMapper.type.name === MapperTypeNames.Sequence) {
                     valueToDeserialize = [];
                     const elementName = defaultBodyMapper.xmlElementName;
                     if (typeof parsedBody === "object" && elementName) {
@@ -35331,7 +36624,7 @@ function handleErrorResponse$1(parsedResponse, operationSpec, responseSpec, opti
     }
     return { error, shouldReturnResponse: false };
 }
-async function parse$1(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
+async function parse(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
     if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) &&
         operationResponse.bodyAsText) {
         const text = operationResponse.bodyAsText;
@@ -35356,8 +36649,8 @@ async function parse$1(jsonContentTypes, xmlContentTypes, operationResponse, opt
         }
         catch (err) {
             const msg = `Error "${err}" occurred while parsing the response body - ${operationResponse.bodyAsText}.`;
-            const errCode = err.code || RestError$2.PARSE_ERROR;
-            const e = new RestError$2(msg, {
+            const errCode = err.code || RestError.PARSE_ERROR;
+            const e = new RestError(msg, {
                 code: errCode,
                 statusCode: operationResponse.status,
                 request: operationResponse.request,
@@ -35375,12 +36668,11 @@ async function parse$1(jsonContentTypes, xmlContentTypes, operationResponse, opt
  * Gets the list of status codes for streaming responses.
  * @internal
  */
-function getStreamingResponseStatusCodes$1(operationSpec) {
+function getStreamingResponseStatusCodes(operationSpec) {
     const result = new Set();
-    for (const statusCode in operationSpec.responses) {
-        const operationResponse = operationSpec.responses[statusCode];
+    for (const [statusCode, operationResponse] of Object.entries(operationSpec.responses)) {
         if (operationResponse.bodyMapper &&
-            operationResponse.bodyMapper.type.name === MapperTypeNames$1.Stream) {
+            operationResponse.bodyMapper.type.name === MapperTypeNames.Stream) {
             result.add(Number(statusCode));
         }
     }
@@ -35392,7 +36684,7 @@ function getStreamingResponseStatusCodes$1(operationSpec) {
  * @returns The path to this parameter's value as a dotted string.
  * @internal
  */
-function getPathStringFromParameter$1(parameter) {
+function getPathStringFromParameter(parameter) {
     const { parameterPath, mapper } = parameter;
     let result;
     if (typeof parameterPath === "string") {
@@ -35412,22 +36704,22 @@ function getPathStringFromParameter$1(parameter) {
 /**
  * The programmatic identifier of the serializationPolicy.
  */
-const serializationPolicyName$1 = "serializationPolicy";
+const serializationPolicyName = "serializationPolicy";
 /**
  * This policy handles assembling the request body and headers using
  * an OperationSpec and OperationArguments on the request.
  */
-function serializationPolicy$1(options = {}) {
+function serializationPolicy(options = {}) {
     const stringifyXML = options.stringifyXML;
     return {
-        name: serializationPolicyName$1,
-        async sendRequest(request, next) {
-            const operationInfo = getOperationRequestInfo$1(request);
+        name: serializationPolicyName,
+        sendRequest(request, next) {
+            const operationInfo = getOperationRequestInfo(request);
             const operationSpec = operationInfo?.operationSpec;
             const operationArguments = operationInfo?.operationArguments;
             if (operationSpec && operationArguments) {
-                serializeHeaders$1(request, operationArguments, operationSpec);
-                serializeRequestBody$1(request, operationArguments, operationSpec, stringifyXML);
+                serializeHeaders(request, operationArguments, operationSpec);
+                serializeRequestBody(request, operationArguments, operationSpec, stringifyXML);
             }
             return next(request);
         },
@@ -35436,12 +36728,12 @@ function serializationPolicy$1(options = {}) {
 /**
  * @internal
  */
-function serializeHeaders$1(request, operationArguments, operationSpec) {
+function serializeHeaders(request, operationArguments, operationSpec) {
     if (operationSpec.headerParameters) {
         for (const headerParameter of operationSpec.headerParameters) {
-            let headerValue = getOperationArgumentValueFromParameter$1(operationArguments, headerParameter);
+            let headerValue = getOperationArgumentValueFromParameter(operationArguments, headerParameter);
             if ((headerValue !== null && headerValue !== undefined) || headerParameter.mapper.required) {
-                headerValue = operationSpec.serializer.serialize(headerParameter.mapper, headerValue, getPathStringFromParameter$1(headerParameter));
+                headerValue = operationSpec.serializer.serialize(headerParameter.mapper, headerValue, getPathStringFromParameter(headerParameter));
                 const headerCollectionPrefix = headerParameter.mapper
                     .headerCollectionPrefix;
                 if (headerCollectionPrefix) {
@@ -35450,7 +36742,7 @@ function serializeHeaders$1(request, operationArguments, operationSpec) {
                     }
                 }
                 else {
-                    request.headers.set(headerParameter.mapper.serializedName || getPathStringFromParameter$1(headerParameter), headerValue);
+                    request.headers.set(headerParameter.mapper.serializedName || getPathStringFromParameter(headerParameter), headerValue);
                 }
             }
         }
@@ -35465,7 +36757,7 @@ function serializeHeaders$1(request, operationArguments, operationSpec) {
 /**
  * @internal
  */
-function serializeRequestBody$1(request, operationArguments, operationSpec, stringifyXML = function () {
+function serializeRequestBody(request, operationArguments, operationSpec, stringifyXML = function () {
     throw new Error("XML serialization unsupported!");
 }) {
     const serializerOptions = operationArguments.options?.serializerOptions;
@@ -35473,12 +36765,12 @@ function serializeRequestBody$1(request, operationArguments, operationSpec, stri
         xml: {
             rootName: serializerOptions?.xml.rootName ?? "",
             includeRoot: serializerOptions?.xml.includeRoot ?? false,
-            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY$1,
+            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY,
         },
     };
     const xmlCharKey = updatedOptions.xml.xmlCharKey;
     if (operationSpec.requestBody && operationSpec.requestBody.mapper) {
-        request.body = getOperationArgumentValueFromParameter$1(operationArguments, operationSpec.requestBody);
+        request.body = getOperationArgumentValueFromParameter(operationArguments, operationSpec.requestBody);
         const bodyMapper = operationSpec.requestBody.mapper;
         const { required, serializedName, xmlName, xmlElementName, xmlNamespace, xmlNamespacePrefix, nullable, } = bodyMapper;
         const typeName = bodyMapper.type.name;
@@ -35486,14 +36778,14 @@ function serializeRequestBody$1(request, operationArguments, operationSpec, stri
             if ((request.body !== undefined && request.body !== null) ||
                 (nullable && request.body === null) ||
                 required) {
-                const requestBodyParameterPathString = getPathStringFromParameter$1(operationSpec.requestBody);
+                const requestBodyParameterPathString = getPathStringFromParameter(operationSpec.requestBody);
                 request.body = operationSpec.serializer.serialize(bodyMapper, request.body, requestBodyParameterPathString, updatedOptions);
-                const isStream = typeName === MapperTypeNames$1.Stream;
+                const isStream = typeName === MapperTypeNames.Stream;
                 if (operationSpec.isXML) {
                     const xmlnsKey = xmlNamespacePrefix ? `xmlns:${xmlNamespacePrefix}` : "xmlns";
-                    const value = getXmlValueWithNamespace$1(xmlNamespace, xmlnsKey, typeName, request.body, updatedOptions);
-                    if (typeName === MapperTypeNames$1.Sequence) {
-                        request.body = stringifyXML(prepareXMLRootList$1(value, xmlElementName || xmlName || serializedName, xmlnsKey, xmlNamespace), { rootName: xmlName || serializedName, xmlCharKey });
+                    const value = getXmlValueWithNamespace(xmlNamespace, xmlnsKey, typeName, request.body, updatedOptions);
+                    if (typeName === MapperTypeNames.Sequence) {
+                        request.body = stringifyXML(prepareXMLRootList(value, xmlElementName || xmlName || serializedName, xmlnsKey, xmlNamespace), { rootName: xmlName || serializedName, xmlCharKey });
                     }
                     else if (!isStream) {
                         request.body = stringifyXML(value, {
@@ -35502,7 +36794,7 @@ function serializeRequestBody$1(request, operationArguments, operationSpec, stri
                         });
                     }
                 }
-                else if (typeName === MapperTypeNames$1.String &&
+                else if (typeName === MapperTypeNames.String &&
                     (operationSpec.contentType?.match("text/plain") || operationSpec.mediaType === "text")) {
                     // the String serializer has validated that request body is a string
                     // so just send the string.
@@ -35514,16 +36806,16 @@ function serializeRequestBody$1(request, operationArguments, operationSpec, stri
             }
         }
         catch (error) {
-            throw new Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, undefined, "  ")}.`);
+            throw new Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, undefined, "  ")}.`, { cause: error });
         }
     }
     else if (operationSpec.formDataParameters && operationSpec.formDataParameters.length > 0) {
         request.formData = {};
         for (const formDataParameter of operationSpec.formDataParameters) {
-            const formDataParameterValue = getOperationArgumentValueFromParameter$1(operationArguments, formDataParameter);
+            const formDataParameterValue = getOperationArgumentValueFromParameter(operationArguments, formDataParameter);
             if (formDataParameterValue !== undefined && formDataParameterValue !== null) {
-                const formDataParameterPropertyName = formDataParameter.mapper.serializedName || getPathStringFromParameter$1(formDataParameter);
-                request.formData[formDataParameterPropertyName] = operationSpec.serializer.serialize(formDataParameter.mapper, formDataParameterValue, getPathStringFromParameter$1(formDataParameter), updatedOptions);
+                const formDataParameterPropertyName = formDataParameter.mapper.serializedName || getPathStringFromParameter(formDataParameter);
+                request.formData[formDataParameterPropertyName] = operationSpec.serializer.serialize(formDataParameter.mapper, formDataParameterValue, getPathStringFromParameter(formDataParameter), updatedOptions);
             }
         }
     }
@@ -35531,18 +36823,18 @@ function serializeRequestBody$1(request, operationArguments, operationSpec, stri
 /**
  * Adds an xml namespace to the xml serialized object if needed, otherwise it just returns the value itself
  */
-function getXmlValueWithNamespace$1(xmlNamespace, xmlnsKey, typeName, serializedValue, options) {
+function getXmlValueWithNamespace(xmlNamespace, xmlnsKey, typeName, serializedValue, options) {
     // Composite and Sequence schemas already got their root namespace set during serialization
     // We just need to add xmlns to the other schema types
     if (xmlNamespace && !["Composite", "Sequence", "Dictionary"].includes(typeName)) {
         const result = {};
         result[options.xml.xmlCharKey] = serializedValue;
-        result[XML_ATTRKEY$1] = { [xmlnsKey]: xmlNamespace };
+        result[XML_ATTRKEY] = { [xmlnsKey]: xmlNamespace };
         return result;
     }
     return serializedValue;
 }
-function prepareXMLRootList$1(obj, elementName, xmlNamespaceKey, xmlNamespace) {
+function prepareXMLRootList(obj, elementName, xmlNamespaceKey, xmlNamespace) {
     if (!Array.isArray(obj)) {
         obj = [obj];
     }
@@ -35550,7 +36842,7 @@ function prepareXMLRootList$1(obj, elementName, xmlNamespaceKey, xmlNamespace) {
         return { [elementName]: obj };
     }
     const result = { [elementName]: obj };
-    result[XML_ATTRKEY$1] = { [xmlNamespaceKey]: xmlNamespace };
+    result[XML_ATTRKEY] = { [xmlNamespaceKey]: xmlNamespace };
     return result;
 }
 
@@ -35562,16 +36854,16 @@ function prepareXMLRootList$1(obj, elementName, xmlNamespaceKey, xmlNamespace) {
  * Also adds in bearerTokenAuthenticationPolicy if passed a TokenCredential.
  * @param options - Options to customize the created pipeline.
  */
-function createClientPipeline$1(options = {}) {
-    const pipeline = createPipelineFromOptions$1(options ?? {});
+function createClientPipeline(options = {}) {
+    const pipeline = createPipelineFromOptions(options ?? {});
     if (options.credentialOptions) {
-        pipeline.addPolicy(bearerTokenAuthenticationPolicy$1({
+        pipeline.addPolicy(bearerTokenAuthenticationPolicy({
             credential: options.credentialOptions.credential,
             scopes: options.credentialOptions.credentialScopes,
         }));
     }
-    pipeline.addPolicy(serializationPolicy$1(options.serializationOptions), { phase: "Serialize" });
-    pipeline.addPolicy(deserializationPolicy$1(options.deserializationOptions), {
+    pipeline.addPolicy(serializationPolicy(options.serializationOptions), { phase: "Serialize" });
+    pipeline.addPolicy(deserializationPolicy(options.deserializationOptions), {
         phase: "Deserialize",
     });
     return pipeline;
@@ -35579,29 +36871,29 @@ function createClientPipeline$1(options = {}) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-let cachedHttpClient$1;
-function getCachedDefaultHttpClient$1() {
-    if (!cachedHttpClient$1) {
-        cachedHttpClient$1 = createDefaultHttpClient$2();
+let cachedHttpClient;
+function getCachedDefaultHttpClient() {
+    if (!cachedHttpClient) {
+        cachedHttpClient = createDefaultHttpClient();
     }
-    return cachedHttpClient$1;
+    return cachedHttpClient;
 }
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const CollectionFormatToDelimiterMap$1 = {
+const CollectionFormatToDelimiterMap = {
     CSV: ",",
     SSV: " ",
     Multi: "Multi",
     TSV: "\t",
     Pipes: "|",
 };
-function getRequestUrl$1(baseUri, operationSpec, operationArguments, fallbackObject) {
-    const urlReplacements = calculateUrlReplacements$1(operationSpec, operationArguments, fallbackObject);
+function getRequestUrl(baseUri, operationSpec, operationArguments, fallbackObject) {
+    const urlReplacements = calculateUrlReplacements(operationSpec, operationArguments, fallbackObject);
     let isAbsolutePath = false;
-    let requestUrl = replaceAll$1(baseUri, urlReplacements);
+    let requestUrl = replaceAll(baseUri, urlReplacements);
     if (operationSpec.path) {
-        let path = replaceAll$1(operationSpec.path, urlReplacements);
+        let path = replaceAll(operationSpec.path, urlReplacements);
         // QUIRK: sometimes we get a path component like /{nextLink}
         // which may be a fully formed URL with a leading /. In that case, we should
         // remove the leading /
@@ -35611,37 +36903,37 @@ function getRequestUrl$1(baseUri, operationSpec, operationArguments, fallbackObj
         // QUIRK: sometimes we get a path component like {nextLink}
         // which may be a fully formed URL. In that case, we should
         // ignore the baseUri.
-        if (isAbsoluteUrl$1(path)) {
+        if (isAbsoluteUrl(path)) {
             requestUrl = path;
             isAbsolutePath = true;
         }
         else {
-            requestUrl = appendPath$1(requestUrl, path);
+            requestUrl = appendPath(requestUrl, path);
         }
     }
-    const { queryParams, sequenceParams } = calculateQueryParameters$1(operationSpec, operationArguments, fallbackObject);
+    const { queryParams, sequenceParams } = calculateQueryParameters(operationSpec, operationArguments, fallbackObject);
     /**
      * Notice that this call sets the `noOverwrite` parameter to true if the `requestUrl`
      * is an absolute path. This ensures that existing query parameter values in `requestUrl`
      * do not get overwritten. On the other hand when `requestUrl` is not absolute path, it
      * is still being built so there is nothing to overwrite.
      */
-    requestUrl = appendQueryParams$1(requestUrl, queryParams, sequenceParams, isAbsolutePath);
+    requestUrl = appendQueryParams(requestUrl, queryParams, sequenceParams, isAbsolutePath);
     return requestUrl;
 }
-function replaceAll$1(input, replacements) {
+function replaceAll(input, replacements) {
     let result = input;
     for (const [searchValue, replaceValue] of replacements) {
         result = result.split(searchValue).join(replaceValue);
     }
     return result;
 }
-function calculateUrlReplacements$1(operationSpec, operationArguments, fallbackObject) {
+function calculateUrlReplacements(operationSpec, operationArguments, fallbackObject) {
     const result = new Map();
     if (operationSpec.urlParameters?.length) {
         for (const urlParameter of operationSpec.urlParameters) {
-            let urlParameterValue = getOperationArgumentValueFromParameter$1(operationArguments, urlParameter, fallbackObject);
-            const parameterPathString = getPathStringFromParameter$1(urlParameter);
+            let urlParameterValue = getOperationArgumentValueFromParameter(operationArguments, urlParameter, fallbackObject);
+            const parameterPathString = getPathStringFromParameter(urlParameter);
             urlParameterValue = operationSpec.serializer.serialize(urlParameter.mapper, urlParameterValue, parameterPathString);
             if (!urlParameter.skipEncoding) {
                 urlParameterValue = encodeURIComponent(urlParameterValue);
@@ -35651,10 +36943,10 @@ function calculateUrlReplacements$1(operationSpec, operationArguments, fallbackO
     }
     return result;
 }
-function isAbsoluteUrl$1(url) {
+function isAbsoluteUrl(url) {
     return url.includes("://");
 }
-function appendPath$1(url, pathToAppend) {
+function appendPath(url, pathToAppend) {
     if (!pathToAppend) {
         return url;
     }
@@ -35678,10 +36970,11 @@ function appendPath$1(url, pathToAppend) {
     else {
         newPath = newPath + pathToAppend;
     }
-    parsedUrl.pathname = newPath;
+    // Use Object.assign to bypass react-native's incorrect readonly URL.pathname declaration
+    Object.assign(parsedUrl, { pathname: newPath });
     return parsedUrl.toString();
 }
-function calculateQueryParameters$1(operationSpec, operationArguments, fallbackObject) {
+function calculateQueryParameters(operationSpec, operationArguments, fallbackObject) {
     const result = new Map();
     const sequenceParams = new Set();
     if (operationSpec.queryParameters?.length) {
@@ -35689,12 +36982,12 @@ function calculateQueryParameters$1(operationSpec, operationArguments, fallbackO
             if (queryParameter.mapper.type.name === "Sequence" && queryParameter.mapper.serializedName) {
                 sequenceParams.add(queryParameter.mapper.serializedName);
             }
-            let queryParameterValue = getOperationArgumentValueFromParameter$1(operationArguments, queryParameter, fallbackObject);
+            let queryParameterValue = getOperationArgumentValueFromParameter(operationArguments, queryParameter, fallbackObject);
             if ((queryParameterValue !== undefined && queryParameterValue !== null) ||
                 queryParameter.mapper.required) {
-                queryParameterValue = operationSpec.serializer.serialize(queryParameter.mapper, queryParameterValue, getPathStringFromParameter$1(queryParameter));
+                queryParameterValue = operationSpec.serializer.serialize(queryParameter.mapper, queryParameterValue, getPathStringFromParameter(queryParameter));
                 const delimiter = queryParameter.collectionFormat
-                    ? CollectionFormatToDelimiterMap$1[queryParameter.collectionFormat]
+                    ? CollectionFormatToDelimiterMap[queryParameter.collectionFormat]
                     : "";
                 if (Array.isArray(queryParameterValue)) {
                     // replace null and undefined
@@ -35727,7 +37020,7 @@ function calculateQueryParameters$1(operationSpec, operationArguments, fallbackO
                     (queryParameter.collectionFormat === "CSV" || queryParameter.collectionFormat === "Pipes")) {
                     queryParameterValue = queryParameterValue.join(delimiter);
                 }
-                result.set(queryParameter.mapper.serializedName || getPathStringFromParameter$1(queryParameter), queryParameterValue);
+                result.set(queryParameter.mapper.serializedName || getPathStringFromParameter(queryParameter), queryParameterValue);
             }
         }
     }
@@ -35736,7 +37029,7 @@ function calculateQueryParameters$1(operationSpec, operationArguments, fallbackO
         sequenceParams,
     };
 }
-function simpleParseQueryParams$1(queryString) {
+function simpleParseQueryParams(queryString) {
     const result = new Map();
     if (!queryString || queryString[0] !== "?") {
         return result;
@@ -35762,7 +37055,7 @@ function simpleParseQueryParams$1(queryString) {
     return result;
 }
 /** @internal */
-function appendQueryParams$1(url, queryParams, sequenceParams, noOverwrite = false) {
+function appendQueryParams(url, queryParams, sequenceParams, noOverwrite = false) {
     if (queryParams.size === 0) {
         return url;
     }
@@ -35770,7 +37063,7 @@ function appendQueryParams$1(url, queryParams, sequenceParams, noOverwrite = fal
     // QUIRK: parsedUrl.searchParams will have their name/value pairs decoded, which
     // can change their meaning to the server, such as in the case of a SAS signature.
     // To avoid accidentally un-encoding a query param, we parse the key/values ourselves
-    const combinedParams = simpleParseQueryParams$1(parsedUrl.search);
+    const combinedParams = simpleParseQueryParams(parsedUrl.search);
     for (const [name, value] of queryParams) {
         const existingValue = combinedParams.get(name);
         if (Array.isArray(existingValue)) {
@@ -35820,14 +37113,14 @@ function appendQueryParams$1(url, queryParams, sequenceParams, noOverwrite = fal
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$6 = createClientLogger$2("core-client");
+const logger$3 = createClientLogger("core-client");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 /**
  * Initializes a new instance of the ServiceClient.
  */
-let ServiceClient$1 = class ServiceClient {
+class ServiceClient {
     /**
      * If specified, this is the base URI that requests will be made against for this ServiceClient.
      * If it is not specified, then all OperationSpecs must contain a baseUrl property.
@@ -35858,11 +37151,11 @@ let ServiceClient$1 = class ServiceClient {
         this._requestContentType = options.requestContentType;
         this._endpoint = options.endpoint ?? options.baseUri;
         if (options.baseUri) {
-            logger$6.warning("The baseUri option for SDK Clients has been deprecated, please use endpoint instead.");
+            logger$3.warning("The baseUri option for SDK Clients has been deprecated, please use endpoint instead.");
         }
         this._allowInsecureConnection = options.allowInsecureConnection;
-        this._httpClient = options.httpClient || getCachedDefaultHttpClient$1();
-        this.pipeline = options.pipeline || createDefaultPipeline$1(options);
+        this._httpClient = options.httpClient || getCachedDefaultHttpClient();
+        this.pipeline = options.pipeline || createDefaultPipeline(options);
         if (options.additionalPolicies?.length) {
             for (const { policy, position } of options.additionalPolicies) {
                 // Sign happens after Retry and is commonly needed to occur
@@ -35877,7 +37170,7 @@ let ServiceClient$1 = class ServiceClient {
     /**
      * Send the provided httpRequest.
      */
-    async sendRequest(request) {
+    sendRequest(request) {
         return this.pipeline.sendRequest(this._httpClient, request);
     }
     /**
@@ -35894,12 +37187,12 @@ let ServiceClient$1 = class ServiceClient {
         // Templatized URLs sometimes reference properties on the ServiceClient child class,
         // so we have to pass `this` below in order to search these properties if they're
         // not part of OperationArguments
-        const url = getRequestUrl$1(endpoint, operationSpec, operationArguments, this);
-        const request = createPipelineRequest$2({
+        const url = getRequestUrl(endpoint, operationSpec, operationArguments, this);
+        const request = createPipelineRequest({
             url,
         });
         request.method = operationSpec.httpMethod;
-        const operationInfo = getOperationRequestInfo$1(request);
+        const operationInfo = getOperationRequestInfo(request);
         operationInfo.operationSpec = operationSpec;
         operationInfo.operationArguments = operationArguments;
         const contentType = operationSpec.contentType || this._requestContentType;
@@ -35937,11 +37230,11 @@ let ServiceClient$1 = class ServiceClient {
             request.allowInsecureConnection = true;
         }
         if (request.streamResponseStatusCodes === undefined) {
-            request.streamResponseStatusCodes = getStreamingResponseStatusCodes$1(operationSpec);
+            request.streamResponseStatusCodes = getStreamingResponseStatusCodes(operationSpec);
         }
         try {
             const rawResponse = await this.sendRequest(request);
-            const flatResponse = flattenResponse$1(rawResponse, operationSpec.responses[rawResponse.status]);
+            const flatResponse = flattenResponse(rawResponse, operationSpec.responses[rawResponse.status]);
             if (options?.onResponse) {
                 options.onResponse(rawResponse, flatResponse);
             }
@@ -35950,7 +37243,7 @@ let ServiceClient$1 = class ServiceClient {
         catch (error) {
             if (typeof error === "object" && error?.response) {
                 const rawResponse = error.response;
-                const flatResponse = flattenResponse$1(rawResponse, operationSpec.responses[error.statusCode] || operationSpec.responses["default"]);
+                const flatResponse = flattenResponse(rawResponse, operationSpec.responses[error.statusCode] || operationSpec.responses["default"]);
                 error.details = flatResponse;
                 if (options?.onResponse) {
                     options.onResponse(rawResponse, flatResponse, error);
@@ -35959,18 +37252,18 @@ let ServiceClient$1 = class ServiceClient {
             throw error;
         }
     }
-};
-function createDefaultPipeline$1(options) {
-    const credentialScopes = getCredentialScopes$1(options);
+}
+function createDefaultPipeline(options) {
+    const credentialScopes = getCredentialScopes(options);
     const credentialOptions = options.credential && credentialScopes
         ? { credentialScopes, credential: options.credential }
         : undefined;
-    return createClientPipeline$1({
+    return createClientPipeline({
         ...options,
         credentialOptions,
     });
 }
-function getCredentialScopes$1(options) {
+function getCredentialScopes(options) {
     if (options.credentialScopes) {
         return options.credentialScopes;
     }
@@ -35980,7 +37273,7 @@ function getCredentialScopes$1(options) {
     if (options.baseUri) {
         return `${options.baseUri}/.default`;
     }
-    if (options.credential && !options.credentialScopes) {
+    if (options.credential) {
         throw new Error(`When using credentials, the ServiceClientOptions must contain either a endpoint or a credentialScopes. Unable to create a bearerTokenAuthenticationPolicy`);
     }
     return undefined;
@@ -39273,7 +40566,7 @@ const exchangeAcrRefreshTokenForAcrAccessTokenOperationSpec = {
   serializer
 };
 
-class GeneratedClient extends ServiceClient$1 {
+class GeneratedClient extends ServiceClient {
   url;
   apiVersion;
   /**
@@ -39342,12 +40635,12 @@ class GeneratedClient extends ServiceClient$1 {
   authentication;
 }
 
-const SDK_VERSION$2 = "1.1.2";
+const SDK_VERSION$1 = "1.1.2";
 
-const tracingClient$1 = createTracingClient$1({
+const tracingClient$1 = createTracingClient({
   namespace: "Microsoft.ContainerRegistry",
   packageName: "@azure/container-registry",
-  packageVersion: SDK_VERSION$2
+  packageVersion: SDK_VERSION$1
 });
 
 function extractNextLink(value) {
@@ -39367,10 +40660,10 @@ function parseWWWAuthenticate(wwwAuthenticate) {
   return value;
 }
 
-function delay$3(t, value) {
+function delay$1(t, value) {
   return new Promise((resolve) => setTimeout(() => resolve(value), t));
 }
-const DEFAULT_CYCLER_OPTIONS$1 = {
+const DEFAULT_CYCLER_OPTIONS = {
   forcedRefreshWindowInMs: 1e3,
   // Force waiting for a refresh 1s before the token expires
   retryIntervalInMs: 3e3,
@@ -39378,7 +40671,7 @@ const DEFAULT_CYCLER_OPTIONS$1 = {
   refreshWindowInMs: 1e3 * 60 * 2
   // Start refreshing 2m before expiry
 };
-async function beginRefresh$1(getAccessToken, retryIntervalInMs, refreshTimeout) {
+async function beginRefresh(getAccessToken, retryIntervalInMs, refreshTimeout) {
   async function tryGetAccessToken() {
     if (Date.now() < refreshTimeout) {
       try {
@@ -39396,16 +40689,16 @@ async function beginRefresh$1(getAccessToken, retryIntervalInMs, refreshTimeout)
   }
   let token = await tryGetAccessToken();
   while (token === null) {
-    await delay$3(retryIntervalInMs);
+    await delay$1(retryIntervalInMs);
     token = await tryGetAccessToken();
   }
   return token;
 }
-function createTokenCycler$1(credential, tokenCyclerOptions) {
+function createTokenCycler(credential, tokenCyclerOptions) {
   let refreshWorker = null;
   let token = null;
   const options = {
-    ...DEFAULT_CYCLER_OPTIONS$1,
+    ...DEFAULT_CYCLER_OPTIONS,
     ...tokenCyclerOptions
   };
   const cycler = {
@@ -39433,7 +40726,7 @@ function createTokenCycler$1(credential, tokenCyclerOptions) {
   function refresh(scopes, getTokenOptions) {
     if (!cycler.isRefreshing) {
       const tryGetAccessToken = () => credential.getToken(scopes, getTokenOptions);
-      refreshWorker = beginRefresh$1(
+      refreshWorker = beginRefresh(
         tryGetAccessToken,
         options.retryIntervalInMs,
         // If we don't have a token, then we should timeout immediately
@@ -39469,7 +40762,7 @@ class ChallengeHandler {
   constructor(credential, options = {}) {
     this.credential = credential;
     this.options = options;
-    this.cycler = createTokenCycler$1(credential, {
+    this.cycler = createTokenCycler(credential, {
       refreshWindowInMs: fiveMinutesInMs
     });
   }
@@ -40147,7 +41440,7 @@ class ContainerRegistryClient {
         ...options?.redirectOptions
       },
       loggingOptions: {
-        logger: logger$7.info,
+        logger: logger$4.info,
         // This array contains header names we want to log that are not already
         // included as safe. Unknown/unsafe headers are logged as "<REDACTED>".
         additionalAllowedQueryParameters: ["last", "n", "orderby", "digest"]
@@ -40158,7 +41451,7 @@ class ContainerRegistryClient {
     const authClient = new GeneratedClient(endpoint, serviceVersion, internalPipelineOptions);
     this.client = new GeneratedClient(endpoint, serviceVersion, internalPipelineOptions);
     this.client.pipeline.addPolicy(
-      bearerTokenAuthenticationPolicy$1({
+      bearerTokenAuthenticationPolicy({
         credential,
         scopes: [defaultScope],
         challengeCallbacks: new ChallengeHandler(
@@ -40297,7 +41590,7 @@ var KnownContainerRegistryAudience = /* @__PURE__ */ ((KnownContainerRegistryAud
 /**
  * Current version of the `@azure/identity` package.
  */
-const SDK_VERSION$1 = `4.13.2`;
+const SDK_VERSION = `4.14.1`;
 /**
  * The default client ID for authentication
  * @internal
@@ -40493,10 +41786,7 @@ class AuthenticationError extends Error {
      */
     errorResponse;
     constructor(statusCode, errorBody, options) {
-        let errorResponse = {
-            error: "unknown",
-            errorDescription: "An unknown error occurred and no additional details are available.",
-        };
+        let errorResponse;
         if (isErrorResponse(errorBody)) {
             errorResponse = convertOAuthErrorResponseToErrorResponse(errorBody);
         }
@@ -40571,343 +41861,10 @@ class AuthenticationRequiredError extends Error {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-function log(message, ...args) {
-    process$1.stderr.write(`${require$$0$4.format(message, ...args)}${EOL}`);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Returns the value of the specified environment variable.
- *
- * @internal
- */
-function getEnvironmentVariable(name) {
-    return process$1.env[name];
-}
-/**
- * A constant that indicates whether the environment the code is running is Deno.
- */
-typeof process$1.versions.deno === "string" && process$1.versions.deno.length > 0;
-/**
- * A constant that indicates whether the environment the code is running is Bun.sh.
- */
-typeof process$1.versions.bun === "string" && process$1.versions.bun.length > 0;
-/**
- * A constant that indicates whether the environment the code is running is a Node.js compatible environment.
- */
-const isNodeLike$1 = true;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const debugEnvVariable = getEnvironmentVariable("DEBUG");
-let enabledString;
-let enabledNamespaces = [];
-let skippedNamespaces = [];
-const debuggers = [];
-if (debugEnvVariable) {
-    enable(debugEnvVariable);
-}
-const debugObj = Object.assign((namespace) => {
-    return createDebugger(namespace);
-}, {
-    enable,
-    enabled,
-    disable,
-    log,
-});
-function enable(namespaces) {
-    enabledString = namespaces;
-    enabledNamespaces = [];
-    skippedNamespaces = [];
-    const namespaceList = namespaces.split(",").map((ns) => ns.trim());
-    for (const ns of namespaceList) {
-        if (ns.startsWith("-")) {
-            skippedNamespaces.push(ns.substring(1));
-        }
-        else {
-            enabledNamespaces.push(ns);
-        }
-    }
-    for (const instance of debuggers) {
-        instance.enabled = enabled(instance.namespace);
-    }
-}
-function enabled(namespace) {
-    if (namespace.endsWith("*")) {
-        return true;
-    }
-    for (const skipped of skippedNamespaces) {
-        if (namespaceMatches(namespace, skipped)) {
-            return false;
-        }
-    }
-    for (const enabledNamespace of enabledNamespaces) {
-        if (namespaceMatches(namespace, enabledNamespace)) {
-            return true;
-        }
-    }
-    return false;
-}
-/**
- * Given a namespace, check if it matches a pattern.
- * Patterns only have a single wildcard character which is *.
- * The behavior of * is that it matches zero or more other characters.
- */
-function namespaceMatches(namespace, patternToMatch) {
-    // simple case, no pattern matching required
-    if (patternToMatch.indexOf("*") === -1) {
-        return namespace === patternToMatch;
-    }
-    let pattern = patternToMatch;
-    // normalize successive * if needed
-    if (patternToMatch.indexOf("**") !== -1) {
-        const patternParts = [];
-        let lastCharacter = "";
-        for (const character of patternToMatch) {
-            if (character === "*" && lastCharacter === "*") {
-                continue;
-            }
-            else {
-                lastCharacter = character;
-                patternParts.push(character);
-            }
-        }
-        pattern = patternParts.join("");
-    }
-    let namespaceIndex = 0;
-    let patternIndex = 0;
-    const patternLength = pattern.length;
-    const namespaceLength = namespace.length;
-    let lastWildcard = -1;
-    let lastWildcardNamespace = -1;
-    while (namespaceIndex < namespaceLength && patternIndex < patternLength) {
-        if (pattern[patternIndex] === "*") {
-            lastWildcard = patternIndex;
-            patternIndex++;
-            if (patternIndex === patternLength) {
-                // if wildcard is the last character, it will match the remaining namespace string
-                return true;
-            }
-            // now we let the wildcard eat characters until we match the next literal in the pattern
-            while (namespace[namespaceIndex] !== pattern[patternIndex]) {
-                namespaceIndex++;
-                // reached the end of the namespace without a match
-                if (namespaceIndex === namespaceLength) {
-                    return false;
-                }
-            }
-            // now that we have a match, let's try to continue on
-            // however, it's possible we could find a later match
-            // so keep a reference in case we have to backtrack
-            lastWildcardNamespace = namespaceIndex;
-            namespaceIndex++;
-            patternIndex++;
-            continue;
-        }
-        else if (pattern[patternIndex] === namespace[namespaceIndex]) {
-            // simple case: literal pattern matches so keep going
-            patternIndex++;
-            namespaceIndex++;
-        }
-        else if (lastWildcard >= 0) {
-            // special case: we don't have a literal match, but there is a previous wildcard
-            // which we can backtrack to and try having the wildcard eat the match instead
-            patternIndex = lastWildcard + 1;
-            namespaceIndex = lastWildcardNamespace + 1;
-            // we've reached the end of the namespace without a match
-            if (namespaceIndex === namespaceLength) {
-                return false;
-            }
-            // similar to the previous logic, let's keep going until we find the next literal match
-            while (namespace[namespaceIndex] !== pattern[patternIndex]) {
-                namespaceIndex++;
-                if (namespaceIndex === namespaceLength) {
-                    return false;
-                }
-            }
-            lastWildcardNamespace = namespaceIndex;
-            namespaceIndex++;
-            patternIndex++;
-            continue;
-        }
-        else {
-            return false;
-        }
-    }
-    const namespaceDone = namespaceIndex === namespace.length;
-    const patternDone = patternIndex === pattern.length;
-    // this is to detect the case of an unneeded final wildcard
-    // e.g. the pattern `ab*` should match the string `ab`
-    const trailingWildCard = patternIndex === pattern.length - 1 && pattern[patternIndex] === "*";
-    return namespaceDone && (patternDone || trailingWildCard);
-}
-function disable() {
-    const result = enabledString || "";
-    enable("");
-    return result;
-}
-function createDebugger(namespace) {
-    const newDebugger = Object.assign(debug, {
-        enabled: enabled(namespace),
-        destroy,
-        log: debugObj.log,
-        namespace,
-        extend,
-    });
-    function debug(...args) {
-        if (!newDebugger.enabled) {
-            return;
-        }
-        if (args.length > 0) {
-            args[0] = `${namespace} ${args[0]}`;
-        }
-        newDebugger.log(...args);
-    }
-    debuggers.push(newDebugger);
-    return newDebugger;
-}
-function destroy() {
-    const index = debuggers.indexOf(this);
-    if (index >= 0) {
-        debuggers.splice(index, 1);
-        return true;
-    }
-    return false;
-}
-function extend(namespace) {
-    const newDebugger = createDebugger(`${this.namespace}:${namespace}`);
-    newDebugger.log = this.log;
-    return newDebugger;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const TYPESPEC_RUNTIME_LOG_LEVELS = ["verbose", "info", "warning", "error"];
-const levelMap = {
-    verbose: 400,
-    info: 300,
-    warning: 200,
-    error: 100,
-};
-function patchLogMethod(parent, child) {
-    child.log = (...args) => {
-        parent.log(...args);
-    };
-}
-function isTypeSpecRuntimeLogLevel(level) {
-    return TYPESPEC_RUNTIME_LOG_LEVELS.includes(level);
-}
-/**
- * Creates a logger context base on the provided options.
- * @param options - The options for creating a logger context.
- * @returns The logger context.
- */
-function createLoggerContext(options) {
-    const registeredLoggers = new Set();
-    const logLevelFromEnv = getEnvironmentVariable(options.logLevelEnvVarName);
-    let logLevel;
-    const clientLogger = debugObj(options.namespace);
-    clientLogger.log = (...args) => {
-        debugObj.log(...args);
-    };
-    function contextSetLogLevel(level) {
-        if (level && !isTypeSpecRuntimeLogLevel(level)) {
-            throw new Error(`Unknown log level '${level}'. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS.join(",")}`);
-        }
-        logLevel = level;
-        const enabledNamespaces = [];
-        for (const logger of registeredLoggers) {
-            if (shouldEnable(logger)) {
-                enabledNamespaces.push(logger.namespace);
-            }
-        }
-        debugObj.enable(enabledNamespaces.join(","));
-    }
-    if (logLevelFromEnv) {
-        // avoid calling setLogLevel because we don't want a mis-set environment variable to crash
-        if (isTypeSpecRuntimeLogLevel(logLevelFromEnv)) {
-            contextSetLogLevel(logLevelFromEnv);
-        }
-        else {
-            console.error(`${options.logLevelEnvVarName} set to unknown log level '${logLevelFromEnv}'; logging is not enabled. Acceptable values: ${TYPESPEC_RUNTIME_LOG_LEVELS.join(", ")}.`);
-        }
-    }
-    function shouldEnable(logger) {
-        return Boolean(logLevel && levelMap[logger.level] <= levelMap[logLevel]);
-    }
-    function createLogger(parent, level) {
-        const logger = Object.assign(parent.extend(level), {
-            level,
-        });
-        patchLogMethod(parent, logger);
-        if (shouldEnable(logger)) {
-            const enabledNamespaces = debugObj.disable();
-            debugObj.enable(enabledNamespaces + "," + logger.namespace);
-        }
-        registeredLoggers.add(logger);
-        return logger;
-    }
-    function contextGetLogLevel() {
-        return logLevel;
-    }
-    function contextCreateClientLogger(namespace) {
-        const clientRootLogger = clientLogger.extend(namespace);
-        patchLogMethod(clientLogger, clientRootLogger);
-        return {
-            error: createLogger(clientRootLogger, "error"),
-            warning: createLogger(clientRootLogger, "warning"),
-            info: createLogger(clientRootLogger, "info"),
-            verbose: createLogger(clientRootLogger, "verbose"),
-        };
-    }
-    return {
-        setLogLevel: contextSetLogLevel,
-        getLogLevel: contextGetLogLevel,
-        createClientLogger: contextCreateClientLogger,
-        logger: clientLogger,
-    };
-}
-const context$1 = createLoggerContext({
-    logLevelEnvVarName: "TYPESPEC_RUNTIME_LOG_LEVEL",
-    namespace: "typeSpecRuntime",
-});
-/**
- * Creates a logger for use by the SDKs that inherits from `TypeSpecRuntimeLogger`.
- * @param namespace - The name of the SDK package.
- * @hidden
- */
-function createClientLogger$1(namespace) {
-    return context$1.createClientLogger(namespace);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const context = createLoggerContext({
-    logLevelEnvVarName: "AZURE_LOG_LEVEL",
-    namespace: "azure",
-});
-/**
- * Retrieves the currently specified log level.
- */
-function getLogLevel() {
-    return context.getLogLevel();
-}
-/**
- * Creates a logger for use by the Azure SDKs that inherits from `AzureLogger`.
- * @param namespace - The name of the SDK package.
- * @hidden
- */
-function createClientLogger(namespace) {
-    return context.createClientLogger(namespace);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
 /**
  * The AzureLogger used for all clients within the identity package
  */
-const logger$5 = createClientLogger("identity");
+const logger$2 = createClientLogger("identity");
 /**
  * Formatting the success event on the credentials
  */
@@ -40932,7 +41889,7 @@ function formatError(scope, error) {
  *   `[title] => [message]`
  *
  */
-function credentialLoggerInstance(title, parent, log = logger$5) {
+function credentialLoggerInstance(title, parent, log = logger$2) {
     const fullTitle = parent ? `${parent.fullTitle} ${title}` : title;
     function info(message) {
         log.info(`${fullTitle} =>`, message);
@@ -40965,223 +41922,12 @@ function credentialLoggerInstance(title, parent, log = logger$5) {
  *   `[title] => getToken() => [message]`
  *
  */
-function credentialLogger(title, log = logger$5) {
+function credentialLogger(title, log = logger$2) {
     const credLogger = credentialLoggerInstance(title, undefined, log);
     return {
         ...credLogger,
         parent: log,
         getToken: credentialLoggerInstance("=> getToken()", credLogger, log),
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/** @internal */
-const knownContextKeys = {
-    span: Symbol.for("@azure/core-tracing span"),
-    namespace: Symbol.for("@azure/core-tracing namespace"),
-};
-/**
- * Creates a new {@link TracingContext} with the given options.
- * @param options - A set of known keys that may be set on the context.
- * @returns A new {@link TracingContext} with the given options.
- *
- * @internal
- */
-function createTracingContext(options = {}) {
-    let context = new TracingContextImpl(options.parentContext);
-    if (options.span) {
-        context = context.setValue(knownContextKeys.span, options.span);
-    }
-    if (options.namespace) {
-        context = context.setValue(knownContextKeys.namespace, options.namespace);
-    }
-    return context;
-}
-/** @internal */
-class TracingContextImpl {
-    _contextMap;
-    constructor(initialContext) {
-        this._contextMap =
-            initialContext instanceof TracingContextImpl
-                ? new Map(initialContext._contextMap)
-                : new Map();
-    }
-    setValue(key, value) {
-        const newContext = new TracingContextImpl(this);
-        newContext._contextMap.set(key, value);
-        return newContext;
-    }
-    getValue(key) {
-        return this._contextMap.get(key);
-    }
-    deleteValue(key) {
-        const newContext = new TracingContextImpl(this);
-        newContext._contextMap.delete(key);
-        return newContext;
-    }
-}
-
-var stateCjs$1 = {};
-
-var hasRequiredStateCjs$1;
-
-function requireStateCjs$1 () {
-	if (hasRequiredStateCjs$1) return stateCjs$1;
-	hasRequiredStateCjs$1 = 1;
-	// Copyright (c) Microsoft Corporation.
-	// Licensed under the MIT License.
-	Object.defineProperty(stateCjs$1, "__esModule", { value: true });
-	stateCjs$1.state = void 0;
-	/**
-	 * @internal
-	 *
-	 * Holds the singleton instrumenter, to be shared across CJS and ESM imports.
-	 */
-	stateCjs$1.state = {
-	    instrumenterImplementation: undefined,
-	};
-	
-	return stateCjs$1;
-}
-
-var stateCjsExports$1 = requireStateCjs$1();
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-// @ts-expect-error The recommended approach to sharing module state between ESM and CJS.
-// See https://github.com/isaacs/tshy/blob/main/README.md#module-local-state for additional information.
-/**
- * Defines the shared state between CJS and ESM by re-exporting the CJS state.
- */
-const state$1 = stateCjsExports$1.state;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function createDefaultTracingSpan() {
-    return {
-        end: () => {
-            // noop
-        },
-        isRecording: () => false,
-        recordException: () => {
-            // noop
-        },
-        setAttribute: () => {
-            // noop
-        },
-        setStatus: () => {
-            // noop
-        },
-        addEvent: () => {
-            // noop
-        },
-    };
-}
-function createDefaultInstrumenter() {
-    return {
-        createRequestHeaders: () => {
-            return {};
-        },
-        parseTraceparentHeader: () => {
-            return undefined;
-        },
-        startSpan: (_name, spanOptions) => {
-            return {
-                span: createDefaultTracingSpan(),
-                tracingContext: createTracingContext({ parentContext: spanOptions.tracingContext }),
-            };
-        },
-        withContext(_context, callback, ...callbackArgs) {
-            return callback(...callbackArgs);
-        },
-    };
-}
-/**
- * Gets the currently set instrumenter, a No-Op instrumenter by default.
- *
- * @returns The currently set instrumenter
- */
-function getInstrumenter() {
-    if (!state$1.instrumenterImplementation) {
-        state$1.instrumenterImplementation = createDefaultInstrumenter();
-    }
-    return state$1.instrumenterImplementation;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates a new tracing client.
- *
- * @param options - Options used to configure the tracing client.
- * @returns - An instance of {@link TracingClient}.
- */
-function createTracingClient(options) {
-    const { namespace, packageName, packageVersion } = options;
-    function startSpan(name, operationOptions, spanOptions) {
-        const startSpanResult = getInstrumenter().startSpan(name, {
-            ...spanOptions,
-            packageName,
-            packageVersion,
-            tracingContext: operationOptions?.tracingOptions?.tracingContext,
-        });
-        let tracingContext = startSpanResult.tracingContext;
-        const span = startSpanResult.span;
-        if (!tracingContext.getValue(knownContextKeys.namespace)) {
-            tracingContext = tracingContext.setValue(knownContextKeys.namespace, namespace);
-        }
-        span.setAttribute("az.namespace", tracingContext.getValue(knownContextKeys.namespace));
-        const updatedOptions = Object.assign({}, operationOptions, {
-            tracingOptions: { ...operationOptions?.tracingOptions, tracingContext },
-        });
-        return {
-            span,
-            updatedOptions,
-        };
-    }
-    async function withSpan(name, operationOptions, callback, spanOptions) {
-        const { span, updatedOptions } = startSpan(name, operationOptions, spanOptions);
-        try {
-            const result = await withContext(updatedOptions.tracingOptions.tracingContext, () => callback(updatedOptions, span));
-            span.setStatus({ status: "success" });
-            return result;
-        }
-        catch (err) {
-            span.setStatus({ status: "error", error: err });
-            throw err;
-        }
-        finally {
-            span.end();
-        }
-    }
-    function withContext(context, callback, ...callbackArgs) {
-        return getInstrumenter().withContext(context, callback, ...callbackArgs);
-    }
-    /**
-     * Parses a traceparent header value into a span identifier.
-     *
-     * @param traceparentHeader - The traceparent header to parse.
-     * @returns An implementation-specific identifier for the span.
-     */
-    function parseTraceparentHeader(traceparentHeader) {
-        return getInstrumenter().parseTraceparentHeader(traceparentHeader);
-    }
-    /**
-     * Creates a set of request headers to propagate tracing information to a backend.
-     *
-     * @param tracingContext - The context containing the span to serialize.
-     * @returns The set of headers to add to a request.
-     */
-    function createRequestHeaders(tracingContext) {
-        return getInstrumenter().createRequestHeaders(tracingContext);
-    }
-    return {
-        startSpan,
-        withSpan,
-        withContext,
-        parseTraceparentHeader,
-        createRequestHeaders,
     };
 }
 
@@ -41194,10 +41940,10 @@ function createTracingClient(options) {
 const tracingClient = createTracingClient({
     namespace: "Microsoft.AAD",
     packageName: "@azure/identity",
-    packageVersion: SDK_VERSION$1,
+    packageVersion: SDK_VERSION,
 });
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41340,7 +42086,7 @@ class Serializer {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41397,8 +42143,14 @@ const USERNAME = "username";
 const USER_ID = "user_id";
 const FMI_PATH = "fmi_path";
 const ATTRIBUTE_TOKENS = "attribute_tokens";
+/**
+ * Popup-origin-check-done. Signals to the STS that the client verified the
+ * popup cannot be reached by an untrusted window, so the
+ * Cross-Origin-Opener-Policy response header may be omitted.
+ */
+const POPUP_ORIGIN_CHECK_DONE = "pocd";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41410,7 +42162,6 @@ const DEFAULT_AUTHORITY_HOST = "login.microsoftonline.com";
 const DEFAULT_COMMON_TENANT = "common";
 // ADFS String
 const ADFS = "adfs";
-const DSTS = "dstsv2";
 // Default AAD Instance Discovery Endpoint
 const AAD_INSTANCE_DISCOVERY_ENDPT = `${DEFAULT_AUTHORITY}discovery/instance?api-version=1.1&authorization_endpoint=`;
 // CIAM URL
@@ -41441,7 +42192,6 @@ const KNOWN_PUBLIC_CLOUDS = [
 ];
 const INVALID_INSTANCE = "invalid_instance";
 const HTTP_SUCCESS = 200;
-const HTTP_REDIRECT = 302;
 const HTTP_CLIENT_ERROR_RANGE_START = 400;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_CLIENT_ERROR_RANGE_END = 499;
@@ -41459,6 +42209,7 @@ const OIDC_SCOPES = [...OIDC_DEFAULT_SCOPES, EMAIL_SCOPE];
 const HeaderNames = {
     CONTENT_TYPE: "Content-Type",
     CONTENT_LENGTH: "Content-Length",
+    DPOP: "DPoP",
     RETRY_AFTER: "Retry-After",
     CCS_HEADER: "X-AnchorMailbox",
     WWWAuthenticate: "WWW-Authenticate",
@@ -41483,6 +42234,7 @@ const ClaimsRequestKeys = {
     ID_TOKEN: "id_token",
     SIGNIN_STATE: "signin_state",
     LOGIN_HINT: "login_hint",
+    TENANT_REGION_SUB_SCOPE: "tenant_region_sub_scope",
 };
 /**
  * we considered making this "enum" in the request instead of string, however it looks like the allowed list of
@@ -41510,6 +42262,7 @@ const OAuthResponseType = {
  */
 const ResponseMode = {
     QUERY: "query",
+    FRAGMENT: "fragment",
     FORM_POST: "form_post",
 };
 /**
@@ -41573,6 +42326,7 @@ const SERVER_TELEM_UNKNOWN_ERROR = "unknown_error";
 const AuthenticationScheme = {
     BEARER: "Bearer",
     POP: "pop",
+    DPOP: "DPoP",
     SSH: "ssh-cert",
 };
 /**
@@ -41639,7 +42393,7 @@ const EncodingTypes = {
     BASE64: "base64",
     HEX: "hex"};
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41668,7 +42422,7 @@ function createAuthError(code, correlationId, additionalMessage) {
     return new AuthError(code, correlationId, additionalMessage || getDefaultErrorMessage(code));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -41691,7 +42445,7 @@ function createClientAuthError(errorCode, correlationId, additionalMessage) {
     return new ClientAuthError(errorCode, correlationId, additionalMessage);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41717,6 +42471,7 @@ const noAccountInSilentRequest = "no_account_in_silent_request";
 const invalidCacheRecord = "invalid_cache_record";
 const invalidCacheEnvironment = "invalid_cache_environment";
 const noCryptoObject = "no_crypto_object";
+const dpopTokenTypeMismatch = "dpop_token_type_mismatch";
 const tokenRefreshRequired = "token_refresh_required";
 const tokenClaimsCnfRequiredForSignedJwt = "token_claims_cnf_required_for_signedjwt";
 const endSessionEndpointNotSupported = "end_session_endpoint_not_supported";
@@ -41725,7 +42480,7 @@ const methodNotImplemented = "method_not_implemented";
 const resourceParameterRequired = "resource_parameter_required";
 const misplacedResourceParam = "misplaced_resource_parameter";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -41763,7 +42518,7 @@ function buildClientInfoFromHomeAccountId(homeAccountId) {
     };
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -41829,7 +42584,7 @@ function getJWSPayload(authToken, correlationId) {
     return matches[2];
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -41917,7 +42672,7 @@ function updateAccountTenantProfileData(baseAccountInfo, tenantProfile, idTokenC
     return updatedAccountInfo;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41928,11 +42683,10 @@ function updateAccountTenantProfileData(baseAccountInfo, tenantProfile, idTokenC
 const AuthorityType = {
     Default: 0,
     Adfs: 1,
-    Dsts: 2,
     Ciam: 3,
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41954,7 +42708,7 @@ function getTenantIdFromIdTokenClaims(idTokenClaims) {
     return null;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -41973,7 +42727,7 @@ const ProtocolMode = {
      */
     OIDC: "OIDC"};
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /**
  * Returns the AccountInfo interface for this account.
  * @internal
@@ -42088,8 +42842,8 @@ function createAccountEntity(accountDetails, authority, correlationId, base64Dec
  * @param authType
  */
 function generateHomeAccountId(serverClientInfo, authType, logger, cryptoObj, correlationId, idTokenClaims) {
-    // since ADFS/DSTS do not have tid and does not set client_info
-    if (!(authType === AuthorityType.Adfs || authType === AuthorityType.Dsts)) {
+    // ADFS does not have tid and does not set client_info
+    if (authType !== AuthorityType.Adfs) {
         // for cases where there is clientInfo
         if (serverClientInfo) {
             try {
@@ -42122,10 +42876,10 @@ function isAccountEntity(entity) {
         entity.hasOwnProperty("authorityType"));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 const postRequestFailed = "post_request_failed";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -42145,7 +42899,47 @@ function createClientConfigurationError(errorCode, correlationId) {
     return new ClientConfigurationError(errorCode, correlationId);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+// Track only our normalized copies, never caller-owned mutable inputs.
+const normalizedHeaderRecords = new WeakSet();
+/**
+ * Creates a lowercase-keyed snapshot without changing header values or the input.
+ * Reuses snapshots produced by this function to avoid repeated normalization.
+ * @internal
+ */
+function normalizeResponseHeaders(headers) {
+    if (normalizedHeaderRecords.has(headers)) {
+        return headers;
+    }
+    const normalized = Object.fromEntries(Object.entries(headers).map(([name, value]) => [
+        name.toLowerCase(),
+        value,
+    ]));
+    normalizedHeaderRecords.add(normalized);
+    return normalized;
+}
+/**
+ * Reads a response header case-insensitively.
+ * Normalized snapshots are never scanned, even when a header is missing.
+ * @internal
+ */
+function getResponseHeader(headers, name) {
+    const key = name.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(headers, key)) {
+        return headers[key];
+    }
+    if (normalizedHeaderRecords.has(headers)) {
+        return undefined;
+    }
+    const headerName = Object.keys(headers).find((header) => header.toLowerCase() === key);
+    return headerName === undefined ? undefined : headers[headerName];
+}
+
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42165,8 +42959,12 @@ const untrustedAuthority = "untrusted_authority";
 const missingSshJwk = "missing_ssh_jwk";
 const issuerValidationFailed = "issuer_validation_failed";
 const invalidResponseMode = "invalid_response_mode";
+const invalidDpopHtm = "invalid_dpop_htm";
+const invalidDpopHtu = "invalid_dpop_htu";
+const invalidDpopNonce = "invalid_dpop_nonce";
+const dpopMissingResourceContext = "dpop_missing_resource_context";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42178,7 +42976,7 @@ function isOpenIdConfigResponse(response) {
         response.hasOwnProperty("jwks_uri"));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42258,7 +43056,7 @@ class StringUtils {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -42416,7 +43214,7 @@ class UrlString {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -42499,15 +43297,6 @@ const rawMetdataJSON = {
                 preferred_cache: "login.sovcloud-identity.sg",
                 aliases: ["login.sovcloud-identity.sg"],
             },
-            {
-                preferred_network: "login.windows-ppe.net",
-                preferred_cache: "login.windows-ppe.net",
-                aliases: [
-                    "login.windows-ppe.net",
-                    "sts.windows-ppe.net",
-                    "login.microsoft-ppe.com",
-                ],
-            },
         ],
     },
 };
@@ -42579,7 +43368,7 @@ function getCloudDiscoveryMetadataFromNetworkResponse(response, authorityHost) {
     return null;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42588,7 +43377,7 @@ const AzureCloudInstance = {
     // AzureCloudInstance is not specified.
     None: "none"};
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42598,7 +43387,7 @@ function isCloudInstanceDiscoveryResponse(response) {
         response.hasOwnProperty("metadata"));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42608,7 +43397,7 @@ function isCloudInstanceDiscoveryErrorResponse(response) {
         response.hasOwnProperty("error_description"));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42670,7 +43459,7 @@ const RegionDiscoveryGetCurrentVersion = "regionDiscoveryGetCurrentVersion";
  */
 const CacheManagerGetRefreshToken = "cacheManagerGetRefreshToken";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42763,7 +43552,7 @@ const invokeAsync = (callback, eventName, logger, telemetryClient, correlationId
     };
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -42874,7 +43663,7 @@ RegionDiscovery.IMDS_OPTIONS = {
     },
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -42925,11 +43714,11 @@ function wasClockTurnedBack(cachedAt) {
  * @param t number
  * @param value T
  */
-function delay$2(t, value) {
+function delay(t, value) {
     return new Promise((resolve) => setTimeout(() => resolve(value), t));
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -43216,7 +44005,7 @@ function serializeAttributeTokens(attributeTokens) {
     return [...attributeTokens].sort().join(" ");
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -43260,8 +44049,6 @@ class Authority {
             switch (pathSegments[0].toLowerCase()) {
                 case ADFS:
                     return AuthorityType.Adfs;
-                case DSTS:
-                    return AuthorityType.Dsts;
             }
         }
         return AuthorityType.Default;
@@ -44186,7 +44973,7 @@ function buildStaticAuthorityOptions(authOptions) {
     };
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -44220,7 +45007,7 @@ async function createDiscoveredInstance(authorityUri, networkClient, cacheManage
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -44416,7 +45203,7 @@ class ScopeSet {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -44713,6 +45500,20 @@ function addInstanceAware(parameters) {
     }
 }
 /**
+ * Adds `pocd=1`, telling the STS that the client verified the popup driving
+ * this request cannot be reached by an untrusted window, so the
+ * Cross-Origin-Opener-Policy response header may be omitted.
+ *
+ * Only ever added when the check passed — a negative result is signalled by
+ * omitting the parameter, which keeps the STS default (apply COOP) and stays
+ * compatible with library versions that never send it.
+ */
+function addPopupOriginCheckDone(parameters) {
+    if (!parameters.has(POPUP_ORIGIN_CHECK_DONE)) {
+        parameters.set(POPUP_ORIGIN_CHECK_DONE, "1");
+    }
+}
+/**
  * Add extraParameters
  * @param extraParams - String dictionary containing extra parameters to be added.
  */
@@ -44725,11 +45526,15 @@ function addExtraParameters(parameters, extraParams) {
 }
 /**
  * Default optional idToken claims requested on all auth requests.
- * signin_state enables KMSI detection; login_hint enables login hint propagation.
+ * signin_state enables KMSI detection; login_hint enables login hint propagation;
+ * tenant_region_sub_scope identifies the sovereign enclave a tenant belongs to.
  */
 const DEFAULT_ID_TOKEN_CLAIMS = {
     [ClaimsRequestKeys.SIGNIN_STATE]: { essential: false },
     [ClaimsRequestKeys.LOGIN_HINT]: { essential: false },
+    [ClaimsRequestKeys.TENANT_REGION_SUB_SCOPE]: {
+        essential: false,
+    },
 };
 /**
  * Parses a claims JSON string into an object, throwing a ClientConfigurationError
@@ -44788,8 +45593,8 @@ function deepMergeClaims(baseClaims, claimsToMerge) {
 /**
  * Parses claims JSON, optionally deep-merges a second client-originated claims string
  * (`claimsToMerge`, e.g. `claimsFromClient`) with precedence on conflicting keys, merges
- * default optional idToken claims (signin_state, login_hint), and appends client
- * capabilities (xms_cc) to the access_token section.
+ * default optional idToken claims (signin_state, login_hint, tenant_region_sub_scope), and appends client
+ * capabilities (xms_cc) to the access_token section
  * Does not overwrite idToken claims already specified by the caller.
  * @param claims - Existing claims JSON string from the request (may be undefined)
  * @param clientCapabilities - Client capabilities array from configuration
@@ -44916,7 +45721,7 @@ function addAttributeTokens(parameters, attributeTokens) {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -44937,7 +45742,8 @@ function stripLeadingHashOrQuery(responseString) {
     return responseString;
 }
 /**
- * Returns URL hash as server auth code response object.
+ * Returns flat fragment or query parameters as an authorization response.
+ * Application routes and unrecognized responses return null.
  */
 function getDeserializedResponse(responseString) {
     // Check if given hash is empty
@@ -44947,7 +45753,15 @@ function getDeserializedResponse(responseString) {
     try {
         // Strip the # or ? symbol if present
         const normalizedResponse = stripLeadingHashOrQuery(responseString);
-        // If # symbol was not present, above will return empty string, so give original hash value
+        /*
+         * Require a flat parameter name, not an application route.
+         * Reject routes like #/dashboard?tab=orders&code=... and
+         * #/dashboard/orders&state=..., where ?, /, or # appears before
+         * the first = or &. These characters are allowed in parameter values.
+         */
+        if (!/^[^=&?#/]+(?:=|&|$)/.test(normalizedResponse)) {
+            return null;
+        }
         const deserializedHash = Object.fromEntries(new URLSearchParams(normalizedResponse));
         // Check for known response properties
         if (deserializedHash.code ||
@@ -44974,7 +45788,7 @@ function mapToQueryString(parameters) {
     return queryParameterArray.join("&");
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -44985,6 +45799,7 @@ function mapToQueryString(parameters) {
  * @internal
  */
 const JsonWebTokenAlgorithms = {
+    ES256: "ES256",
     RS256: "RS256",
 };
 /**
@@ -45021,7 +45836,7 @@ const DEFAULT_CRYPTO_IMPLEMENTATION = {
     },
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -45044,7 +45859,7 @@ const DEFAULT_TOKEN_BINDING_KEY_MANAGER = {
     },
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -45319,12 +46134,12 @@ class Logger {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /* eslint-disable header/header */
 const name$1 = "@azure/msal-common";
-const version$1 = "16.13.0";
+const version$1 = "16.16.1";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -45332,7 +46147,7 @@ const version$1 = "16.13.0";
 const cacheQuotaExceeded = "cache_quota_exceeded";
 const cacheErrorUnknown = "cache_error_unknown";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -45370,7 +46185,7 @@ function createCacheError(e) {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -45381,9 +46196,10 @@ function createCacheError(e) {
  * @internal
  */
 class CacheManager {
-    constructor(clientId, cryptoImpl, logger, performanceClient, staticAuthorityOptions) {
+    constructor(clientId, cryptoImpl, logger, performanceClient, staticAuthorityOptions, tokenBindingKeyManager) {
         this.clientId = clientId;
         this.cryptoImpl = cryptoImpl;
+        this.tokenBindingKeyManager = tokenBindingKeyManager;
         this.commonLogger = logger.clone(name$1, version$1);
         this.staticAuthorityOptions = staticAuthorityOptions;
         this.performanceClient = performanceClient;
@@ -45618,6 +46434,7 @@ class CacheManager {
         };
         const tokenKeys = this.getTokenKeys();
         const currentScopes = ScopeSet.fromString(credential.target, correlationId);
+        const accessTokenKeysToRemove = [];
         tokenKeys.accessToken.forEach((key) => {
             if (!this.accessTokenKeyMatchesFilter(key, accessTokenFilter, false)) {
                 return;
@@ -45627,10 +46444,13 @@ class CacheManager {
                 this.credentialMatchesFilter(tokenEntity, accessTokenFilter, correlationId)) {
                 const tokenScopeSet = ScopeSet.fromString(tokenEntity.target, correlationId);
                 if (tokenScopeSet.intersectingScopeSets(currentScopes)) {
-                    this.removeAccessToken(key, correlationId);
+                    accessTokenKeysToRemove.push(key);
                 }
             }
         });
+        for (const key of accessTokenKeysToRemove) {
+            await this.removeAccessTokenAndTokenBindingKey(key, correlationId, credential.keyId);
+        }
         await this.setAccessTokenCredential(credential, correlationId, kmsi, additionalCacheKeyHash);
     }
     /**
@@ -45829,19 +46649,25 @@ class CacheManager {
      * @param account
      */
     removeAccount(account, correlationId) {
-        this.removeAccountContext(account, correlationId);
         const accountKeys = this.getAccountKeys();
         const keyFilter = (key) => {
             return (key.includes(account.homeAccountId) &&
                 key.includes(account.environment));
         };
+        this.getTokenKeys()
+            .idToken.filter(keyFilter)
+            .forEach((key) => {
+            this.removeIdToken(key, correlationId);
+        });
+        this.removeAccountContext(account, correlationId);
         accountKeys.filter(keyFilter).forEach((key) => {
             this.removeItem(key, correlationId);
             this.performanceClient.incrementFields({ accountsRemoved: 1 }, correlationId);
         });
     }
     /**
-     * Removes credentials associated with the provided account
+     * Removes access and refresh tokens associated with the provided account,
+     * preserving the account and its ID tokens.
      * @param account
      */
     removeAccountContext(account, correlationId) {
@@ -45850,9 +46676,6 @@ class CacheManager {
             return (key.includes(account.homeAccountId) &&
                 key.includes(account.environment));
         };
-        allTokenKeys.idToken.filter(keyFilter).forEach((key) => {
-            this.removeIdToken(key, correlationId);
-        });
         allTokenKeys.accessToken.filter(keyFilter).forEach((key) => {
             this.removeAccessToken(key, correlationId);
         });
@@ -45866,28 +46689,62 @@ class CacheManager {
      * @param correlationId
      */
     removeAccessToken(key, correlationId) {
+        const credential = this.removeAccessTokenCredential(key, correlationId);
+        if (credential) {
+            void this.removeTokenBindingKeyForCredential(credential, correlationId);
+        }
+    }
+    /**
+     * Removes an access token and waits for any unreferenced token-binding key
+     * cleanup. Internal callers that require deterministic cleanup should use
+     * this method instead of the synchronous public cache contract.
+     */
+    async removeAccessTokenAndTokenBindingKey(key, correlationId, preservedKeyId) {
+        const credential = this.removeAccessTokenCredential(key, correlationId);
+        if (credential) {
+            await this.removeTokenBindingKeyForCredential(credential, correlationId, preservedKeyId);
+        }
+    }
+    removeAccessTokenCredential(key, correlationId) {
         const credential = this.getAccessTokenCredential(key, correlationId);
         if (!credential) {
-            return;
+            return null;
         }
         this.removeItem(key, correlationId);
         this.performanceClient.incrementFields({ accessTokensRemoved: 1 }, correlationId);
-        // Remove Token Binding Key from key store for PoP Tokens Credentials
+        return credential;
+    }
+    async removeTokenBindingKeyForCredential(credential, correlationId, preservedKeyId) {
+        // Remove Token Binding Key from key store for token-bound access token credentials
         if (credential.credentialType.toLowerCase() ===
             CredentialType.ACCESS_TOKEN_WITH_AUTH_SCHEME.toLowerCase()) {
-            if (credential.tokenType === AuthenticationScheme.POP) {
-                const accessTokenWithAuthSchemeEntity = credential;
-                const kid = accessTokenWithAuthSchemeEntity.keyId;
-                if (kid) {
-                    void this.cryptoImpl
-                        .removeTokenBindingKey(kid, correlationId)
-                        .catch(() => {
-                        this.commonLogger.error(`Failed to remove token binding key '${kid}'`, correlationId);
-                        this.performanceClient?.incrementFields({ removeTokenBindingKeyFailure: 1 }, correlationId);
-                    });
+            const tokenType = credential.tokenType?.toLowerCase();
+            switch (tokenType) {
+                case AuthenticationScheme.POP:
+                case AuthenticationScheme.DPOP.toLowerCase(): {
+                    const accessTokenWithAuthSchemeEntity = credential;
+                    const kid = accessTokenWithAuthSchemeEntity.keyId;
+                    if (kid &&
+                        kid !== preservedKeyId &&
+                        !this.isTokenBindingKeyReferenced(kid, correlationId)) {
+                        try {
+                            await this.tokenBindingKeyManager.removeTokenBindingKey(kid, correlationId);
+                        }
+                        catch {
+                            this.commonLogger.error("Failed to remove token binding key", correlationId);
+                            this.performanceClient?.incrementFields({ removeTokenBindingKeyFailure: 1 }, correlationId);
+                        }
+                    }
+                    break;
                 }
             }
         }
+    }
+    isTokenBindingKeyReferenced(keyId, correlationId) {
+        return this.getTokenKeys().accessToken.some((accessTokenKey) => {
+            const accessToken = this.getAccessTokenCredential(accessTokenKey, correlationId);
+            return accessToken?.keyId === keyId;
+        });
     }
     /**
      * Removes all app metadata objects from cache.
@@ -46027,6 +46884,7 @@ class CacheManager {
         const scopes = ScopeSet.createSearchScopes(request.scopes, correlationId);
         const authScheme = request.authenticationScheme ||
             AuthenticationScheme.BEARER;
+        const normalizedAuthScheme = authScheme.toLowerCase();
         /*
          * Distinguish between Bearer and PoP/SSH token cache types
          * Cast to lowercase to handle "bearer" from ADFS
@@ -46051,7 +46909,10 @@ class CacheManager {
             tokenType: authScheme,
             keyId: authScheme === AuthenticationScheme.SSH
                 ? request.sshKid
-                : undefined,
+                : normalizedAuthScheme ===
+                    AuthenticationScheme.DPOP.toLowerCase()
+                    ? request.popKid || request.dpopJkt
+                    : undefined,
             additionalCacheKeyComponents: additionalCacheKeyComponents,
         };
         const accessTokenKeys = (tokenKeys && tokenKeys.accessToken) ||
@@ -46424,16 +47285,15 @@ class CacheManager {
         }
         switch (normalizedFilterTokenType) {
             case "dpop":
-                return this.matchKeyBoundAccessToken(entity, filter, true);
             case AuthenticationScheme.SSH:
-                return this.matchKeyBoundAccessToken(entity, filter, false);
+                return this.matchKeyBoundAccessToken(entity, filter);
             default:
                 return true;
         }
     }
-    matchKeyBoundAccessToken(entity, filter, requireKeyId) {
+    matchKeyBoundAccessToken(entity, filter) {
         if (!filter.keyId) {
-            return !requireKeyId;
+            return true;
         }
         return this.matchKeyId(entity, filter.keyId);
     }
@@ -46552,7 +47412,7 @@ class DefaultStorageClass extends CacheManager {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -46566,7 +47426,7 @@ class DefaultStorageClass extends CacheManager {
 const PerformanceEventStatus = {
     InProgress: 1};
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -46624,7 +47484,7 @@ class StubPerformanceClient {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -46683,15 +47543,16 @@ function buildClientConfiguration({ authOptions: userAuthOptions, systemOptions:
         ...DEFAULT_LOGGER_IMPLEMENTATION,
         ...userLoggerOption,
     };
+    const resolvedTokenBindingKeyManager = tokenBindingKeyManager || DEFAULT_TOKEN_BINDING_KEY_MANAGER;
     return {
         authOptions: buildAuthOptions(userAuthOptions),
         systemOptions: { ...DEFAULT_SYSTEM_OPTIONS$1, ...userSystemOptions },
         loggerOptions: loggerOptions,
         storageInterface: storageImplementation ||
-            new DefaultStorageClass(userAuthOptions.clientId, DEFAULT_CRYPTO_IMPLEMENTATION, new Logger(loggerOptions, name$1, version$1), new StubPerformanceClient()),
+            new DefaultStorageClass(userAuthOptions.clientId, DEFAULT_CRYPTO_IMPLEMENTATION, new Logger(loggerOptions, name$1, version$1), new StubPerformanceClient(), undefined, resolvedTokenBindingKeyManager),
         networkInterface: networkImplementation || DEFAULT_NETWORK_IMPLEMENTATION,
         cryptoInterface: cryptoImplementation || DEFAULT_CRYPTO_IMPLEMENTATION,
-        tokenBindingKeyManager: tokenBindingKeyManager || DEFAULT_TOKEN_BINDING_KEY_MANAGER,
+        tokenBindingKeyManager: resolvedTokenBindingKeyManager,
         clientCredentials: clientCredentials || DEFAULT_CLIENT_CREDENTIALS,
         libraryInfo: { ...DEFAULT_LIBRARY_INFO, ...libraryInfo },
         telemetry: { ...DEFAULT_TELEMETRY_OPTIONS$1, ...telemetry },
@@ -46721,7 +47582,7 @@ function isOidcProtocolMode(config) {
     return (config.authOptions.authority.options.protocolMode === ProtocolMode.OIDC);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -46748,7 +47609,7 @@ function isOidcProtocolMode(config) {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -46769,7 +47630,7 @@ function createJoseHeaderError(code, correlationId) {
     return new JoseHeaderError(code, correlationId);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -46794,7 +47655,7 @@ function isPlainObject(value) {
     return Object.getPrototypeOf(value) === proto;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -46804,7 +47665,7 @@ const missingAlgError = "missing_alg_error";
 const missingJwkError = "missing_jwk_error";
 const invalidJwkError = "invalid_jwk_error";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -46870,7 +47731,7 @@ class JoseHeader {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -46971,7 +47832,162 @@ class PopTokenGenerator {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
+
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+const DPOP_HTM_REGEX = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const DPOP_TOKEN_BINDING_KEY_TYPE = "dpop";
+const DPOP_JWT_HEADER_ALGORITHM = JsonWebTokenAlgorithms.ES256;
+function buildProofHeader(publicJwk, correlationId) {
+    return JoseHeader.getDpopHeader({
+        alg: DPOP_JWT_HEADER_ALGORITHM,
+        jwk: publicJwk,
+    }, correlationId);
+}
+function normalizeHtm(htm, correlationId) {
+    if (typeof htm !== "string" || !DPOP_HTM_REGEX.test(htm)) {
+        throw createClientConfigurationError(invalidDpopHtm, correlationId);
+    }
+    return htm.toUpperCase();
+}
+/**
+ * Normalizes a URL for use as the DPoP htu claim.
+ * Per RFC 9449 §4.2, htu is the target URI without query and fragment components.
+ * WHATWG URL serialization handles RFC 3986 syntax- and scheme-based normalization
+ * such as lowercasing scheme/host and eliding default ports.
+ */
+function normalizeHtu(url, correlationId) {
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(url);
+    }
+    catch {
+        throw createClientConfigurationError(urlParseError, correlationId);
+    }
+    if (!/^https:\/\//i.test(url) ||
+        parsedUrl.protocol !== "https:" ||
+        parsedUrl.username ||
+        parsedUrl.password) {
+        throw createClientConfigurationError(invalidDpopHtu, correlationId);
+    }
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.href;
+}
+function validateDpopNonce(nonce, correlationId) {
+    if (nonce !== undefined && nonce.trim().length === 0) {
+        throw createClientConfigurationError(invalidDpopNonce, correlationId);
+    }
+}
+/**
+ * Validates and normalizes the HTTP resource context for a DPoP-bound request.
+ * @internal
+ */
+function normalizeDpopResourceRequestContext(context, correlationId = "") {
+    return {
+        htm: normalizeHtm(context.htm, correlationId),
+        htu: normalizeHtu(context.htu, correlationId),
+    };
+}
+/**
+ * Builds RFC 9449 DPoP proof JWT payloads for token-endpoint and
+ * resource-endpoint proof bindings.
+ *
+ * Exported from package entry points for use by MSAL Browser.
+ * This helper remains an unsupported internal API for direct consumers.
+ *
+ * DPoP proofs do not contain SHR fields (at, ts, m, u, p, q).
+ * @internal
+ */
+class DpopProofGenerator {
+    constructor(cryptoUtils, tokenBindingKeyManager) {
+        this.cryptoUtils = cryptoUtils;
+        this.tokenBindingKeyManager = tokenBindingKeyManager;
+    }
+    /**
+     * Provisions a fresh DPoP key and returns the RFC 7638 JWK thumbprint used
+     * as `dpop_jkt`.
+     */
+    async generateJkt(correlationId = "") {
+        return this.tokenBindingKeyManager.provisionTokenBindingKey({
+            tokenBindingKeyType: DPOP_TOKEN_BINDING_KEY_TYPE,
+            tokenBindingKeyAlgorithm: DPOP_JWT_HEADER_ALGORITHM,
+            correlationId,
+        });
+    }
+    /**
+     * Builds RFC 9449 claims for a token-endpoint DPoP proof.
+     * - htm is always "POST" because token endpoint requests use HTTP POST (RFC 9449 §5).
+     * - htu is the normalized token endpoint URI (query and fragment stripped).
+     * - jti is a fresh CSPRNG-backed unique identifier for every proof.
+     */
+    buildTokenProofClaims(params, correlationId = "") {
+        validateDpopNonce(params.nonce, correlationId);
+        const claims = {
+            jti: this.cryptoUtils.createNewGuid(),
+            htm: "POST",
+            htu: normalizeHtu(params.tokenEndpoint, correlationId),
+            iat: nowSeconds(),
+        };
+        if (params.nonce !== undefined) {
+            claims.nonce = params.nonce;
+        }
+        return claims;
+    }
+    /**
+     * Builds and signs a compact DPoP proof JWT for a token-endpoint request.
+     */
+    async generateTokenProof(params, keyId, correlationId = "") {
+        return this.generateProof(this.buildTokenProofClaims(params, correlationId), keyId, correlationId);
+    }
+    /**
+     * Builds RFC 9449 claims for a resource-endpoint DPoP proof.
+     * - htm is uppercased per RFC 9449 §4.2.
+     * - htu is the normalized resource URI (query and fragment stripped).
+     * - ath is the base64url-encoded SHA-256 hash of the ASCII access token.
+     * - jti is a fresh CSPRNG-backed unique identifier for every proof.
+     */
+    buildResourceProofClaims(params, correlationId = "") {
+        validateDpopNonce(params.nonce, correlationId);
+        const resourceContext = normalizeDpopResourceRequestContext(params, correlationId);
+        const claims = {
+            jti: this.cryptoUtils.createNewGuid(),
+            htm: resourceContext.htm,
+            htu: resourceContext.htu,
+            ath: params.ath,
+            iat: nowSeconds(),
+        };
+        if (params.nonce !== undefined) {
+            claims.nonce = params.nonce;
+        }
+        return claims;
+    }
+    /**
+     * Builds and signs a compact DPoP proof JWT for a resource request.
+     */
+    async generateResourceProof(params, keyId, correlationId = "") {
+        const { htu, htm, nonce } = params;
+        if (!htu || !htm) {
+            throw createClientConfigurationError(dpopMissingResourceContext, correlationId);
+        }
+        const ath = await this.cryptoUtils.hashString(params.accessToken);
+        return this.generateProof(this.buildResourceProofClaims({
+            htu,
+            htm,
+            ath,
+            nonce,
+        }, correlationId), keyId, correlationId);
+    }
+    async generateProof(claims, keyId, correlationId) {
+        const publicJwk = await this.tokenBindingKeyManager.getTokenBindingPublicKeyJwk(keyId, correlationId);
+        return this.cryptoUtils.signTokenBindingJwt(buildProofHeader(publicJwk, correlationId), claims, keyId, correlationId);
+    }
+}
+
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -47017,7 +48033,7 @@ const badToken = "bad_token";
  */
 const interruptedUser = "interrupted_user";
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47084,7 +48100,7 @@ function createInteractionRequiredAuthError(errorCode, correlationId, errorMessa
     return new InteractionRequiredAuthError(errorCode, correlationId, errorMessage);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47103,7 +48119,42 @@ class ServerError extends AuthError {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
+
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+/**
+ * Appends user state with random guid, or returns random guid.
+ * @param cryptoObj
+ * @param userState
+ * @param meta
+ * @param correlationId
+ */
+function setRequestState(cryptoObj, userState, meta, correlationId) {
+    const libraryState = generateLibraryState(cryptoObj, correlationId);
+    return userState
+        ? `${libraryState}${RESOURCE_DELIM}${userState}`
+        : libraryState;
+}
+/**
+ * Generates the state value used by the common library.
+ * @param cryptoObj
+ * @param correlationId
+ * @param meta
+ */
+function generateLibraryState(cryptoObj, correlationId, meta) {
+    if (!cryptoObj) {
+        throw createClientAuthError(noCryptoObject, correlationId);
+    }
+    // Create a state object containing a unique id and the timestamp of the request creation
+    const stateObj = {
+        id: cryptoObj.createNewGuid(),
+    };
+    const stateString = JSON.stringify(stateObj);
+    return cryptoObj.base64Encode(stateString);
+}
 /**
  * Parses the state into the RequestStateObject, which contains the LibraryState info and the state passed by the user.
  * @param base64Decode
@@ -47136,7 +48187,7 @@ function parseRequestState(base64Decode, state, correlationId) {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47209,11 +48260,26 @@ class ResponseHandler {
         let idTokenClaims;
         if (serverTokenResponse.id_token) {
             idTokenClaims = extractTokenClaims(serverTokenResponse.id_token || "", this.cryptoObj.base64Decode, request.correlationId);
-            // token nonce check (TODO: Add a warning if no nonce is given?)
-            if (authCodePayload && authCodePayload.nonce) {
-                if (idTokenClaims.nonce !== authCodePayload.nonce) {
-                    throw createClientAuthError(nonceMismatch, request.correlationId);
-                }
+        }
+        /*
+         * Callers opt in to strict nonce-presence validation by including
+         * the nonce property, even when its value is undefined.
+         */
+        if (authCodePayload &&
+            Object.prototype.hasOwnProperty.call(authCodePayload, "nonce")) {
+            const expectedNonce = authCodePayload.nonce;
+            const tokenNonce = idTokenClaims?.nonce;
+            // Warn when the ID Token nonce cannot be bound to the request.
+            if (tokenNonce !== undefined && expectedNonce === undefined) {
+                this.logger.warning("Authorization code response contains an ID Token nonce, but no expected nonce was supplied. Rejecting the response.", request.correlationId);
+                throw createClientAuthError(nonceMismatch, request.correlationId);
+            }
+            // If the request supplies a nonce, the ID Token value must be a matching string.
+            if (expectedNonce !== undefined &&
+                (typeof expectedNonce !== "string" ||
+                    typeof tokenNonce !== "string" ||
+                    expectedNonce !== tokenNonce)) {
+                throw createClientAuthError(nonceMismatch, request.correlationId);
             }
         }
         // generate homeAccountId
@@ -47225,7 +48291,21 @@ class ResponseHandler {
         }
         // Add keyId from request to serverTokenResponse if defined
         serverTokenResponse.key_id =
-            serverTokenResponse.key_id || request.sshKid || undefined;
+            serverTokenResponse.key_id ||
+                request.dpopJkt ||
+                request.sshKid ||
+                undefined;
+        if (request.authenticationScheme === AuthenticationScheme.DPOP) {
+            if (serverTokenResponse.token_type?.toLowerCase() !==
+                AuthenticationScheme.DPOP.toLowerCase()) {
+                this.performanceClient?.addFields({
+                    dpopTokenTypeMismatch: serverTokenResponse.token_type,
+                }, request.correlationId);
+                throw createClientAuthError(dpopTokenTypeMismatch, request.correlationId);
+            }
+            serverTokenResponse.token_type =
+                AuthenticationScheme.DPOP;
+        }
         // Compute components once for entity storage (fallback if hash not provided by client)
         const attributeTokenPartition = serializeAttributeTokens(request.attributeTokens);
         const cacheKeyComponents = additionalCacheKeyComponents ??
@@ -47388,7 +48468,9 @@ class ResponseHandler {
         let extExpiresOn;
         let refreshOn;
         let familyId = "";
+        let dpopProof;
         if (cacheRecord.accessToken) {
+            const accessTokenType = cacheRecord.accessToken.tokenType?.toLowerCase();
             /*
              * if the request object has `popKid` property, `signPopToken` will be set to false and
              * the token will be returned unsigned
@@ -47406,6 +48488,18 @@ class ResponseHandler {
             else {
                 accessToken = cacheRecord.accessToken.secret;
             }
+            if (accessTokenType ===
+                AuthenticationScheme.DPOP.toLowerCase()) {
+                if (!cacheRecord.accessToken.keyId) {
+                    throw createClientAuthError(keyIdMissing, request.correlationId);
+                }
+                const dpopProofGenerator = new DpopProofGenerator(cryptoObj, tokenBindingKeyManager);
+                dpopProof = await dpopProofGenerator.generateResourceProof({
+                    htu: request.resourceRequestUri,
+                    htm: request.resourceRequestMethod,
+                    accessToken: cacheRecord.accessToken.secret,
+                }, cacheRecord.accessToken.keyId, request.correlationId);
+            }
             responseScopes = ScopeSet.fromString(cacheRecord.accessToken.target, request.correlationId).asArray();
             // Access token expiresOn cached in seconds, converting to Date for AuthenticationResult
             expiresOn = toDateFromSeconds(cacheRecord.accessToken.expiresOn);
@@ -47422,6 +48516,15 @@ class ResponseHandler {
         }
         const uid = idTokenClaims?.oid || idTokenClaims?.sub || "";
         const tid = idTokenClaims?.tid || "";
+        /*
+         * Surface the sovereign enclave for telemetry. This runs for both freshly acquired
+         * and cache-served tokens because SilentFlowClient shares this method, so the field
+         * is present on silent requests that never hit the network.
+         */
+        const regionSubScope = idTokenClaims?.tenant_region_sub_scope;
+        if (typeof regionSubScope === "string") {
+            performanceClient?.addFields({ regionSubScope }, request.correlationId);
+        }
         // for hybrid + native bridge enablement, send back the native account Id
         if (serverTokenResponse?.spa_accountid && !!cacheRecord.account) {
             // Set on deprecated top-level for downgrade compat
@@ -47450,6 +48553,7 @@ class ResponseHandler {
             idToken: cacheRecord?.idToken?.secret || "",
             idTokenClaims: idTokenClaims || {},
             accessToken: accessToken,
+            dpopProof,
             fromCache: fromTokenCache,
             expiresOn: expiresOn,
             extExpiresOn: extExpiresOn,
@@ -47457,7 +48561,10 @@ class ResponseHandler {
             correlationId: request.correlationId,
             requestId: requestId || "",
             familyId: familyId,
-            tokenType: cacheRecord.accessToken?.tokenType || "",
+            tokenType: cacheRecord.accessToken?.tokenType?.toLowerCase() ===
+                AuthenticationScheme.DPOP.toLowerCase()
+                ? AuthenticationScheme.DPOP
+                : cacheRecord.accessToken?.tokenType || "",
             state: requestState ? requestState.userRequestState : "",
             cloudGraphHostName: cacheRecord.account?.cloudGraphHostName || "",
             msGraphHost: cacheRecord.account?.msGraphHost || "",
@@ -47508,7 +48615,7 @@ function buildAccountToCache(cacheStorage, authority, homeAccountId, base64Decod
     return baseAccount;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -47518,7 +48625,7 @@ const CcsCredentialType = {
     UPN: "UPN",
 };
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -47537,7 +48644,7 @@ async function getClientAssertion(clientAssertion, clientId, tokenEndpoint, fmiP
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47561,7 +48668,7 @@ function getRequestThumbprint(clientId, request, homeAccountId) {
     };
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47596,13 +48703,14 @@ class ThrottlingUtils {
      * Performs necessary throttling checks after a network request.
      * @param cacheManager
      * @param thumbprint
-     * @param response
+     * @param response - Token response with case-insensitive header names.
      */
     static postProcess(cacheManager, thumbprint, response, correlationId) {
+        const retryAfter = getRetryAfterHeader(response);
         if (ThrottlingUtils.checkResponseStatus(response) ||
-            ThrottlingUtils.checkResponseForRetryAfter(response)) {
+            retryAfter !== undefined) {
             const thumbprintValue = {
-                throttleTime: ThrottlingUtils.calculateThrottleTime(parseInt(response.headers[HeaderNames.RETRY_AFTER])),
+                throttleTime: ThrottlingUtils.calculateThrottleTime(parseInt(retryAfter || "")),
                 error: response.body.error,
                 errorCodes: response.body.error_codes,
                 errorMessage: response.body.error_description,
@@ -47621,14 +48729,10 @@ class ThrottlingUtils {
     }
     /**
      * Checks a NetworkResponse object's RetryAfter header
-     * @param response
+     * @param response - Token response with case-insensitive header names.
      */
     static checkResponseForRetryAfter(response) {
-        if (response.headers) {
-            return (response.headers.hasOwnProperty(HeaderNames.RETRY_AFTER) &&
-                (response.status < 200 || response.status >= 300));
-        }
-        return false;
+        return getRetryAfterHeader(response) !== undefined;
     }
     /**
      * Calculates the Unix-time value for a throttle to expire given throttleTime in seconds.
@@ -47646,8 +48750,15 @@ class ThrottlingUtils {
         cacheManager.removeItem(key, request.correlationId);
     }
 }
+/** Reads Retry-After only for non-success responses. */
+function getRetryAfterHeader(response) {
+    if ((response.status < 200 || response.status >= 300) && response.headers) {
+        return getResponseHeader(response.headers, HeaderNames.RETRY_AFTER);
+    }
+    return undefined;
+}
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47678,7 +48789,7 @@ function createNetworkError(error, httpStatus, responseHeaders, additionalError)
     return new NetworkError(error, httpStatus, responseHeaders);
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47707,6 +48818,23 @@ function createTokenRequestHeaders(logger, preventCorsPreflight, ccsCred) {
         }
     }
     return headers;
+}
+/**
+ * Adds the DPoP proof header for token endpoint requests when DPoP is requested.
+ * @internal
+ */
+async function addDpopTokenProofHeader(headers, request, tokenEndpoint, cryptoUtils, tokenBindingKeyManager) {
+    if (request.authenticationScheme !== AuthenticationScheme.DPOP) {
+        return;
+    }
+    const dpopProofGenerator = new DpopProofGenerator(cryptoUtils, tokenBindingKeyManager);
+    const keyId = request.dpopJkt;
+    if (!keyId?.trim()) {
+        throw createClientAuthError(keyIdMissing, request.correlationId);
+    }
+    headers[HeaderNames.DPOP] = await dpopProofGenerator.generateTokenProof({
+        tokenEndpoint,
+    }, keyId, request.correlationId);
 }
 /**
  * Creates query string for the /token request
@@ -47759,7 +48887,8 @@ async function sendPostRequest(thumbprint, tokenEndpoint, options, correlationId
     let response;
     try {
         response = await invokeAsync((networkClient.sendPostRequestAsync.bind(networkClient)), NetworkClientSendPostRequestAsync, logger, performanceClient, correlationId)(tokenEndpoint, { ...options, correlationId, performanceClient });
-        const responseHeaders = response.headers || {};
+        const responseHeaders = normalizeResponseHeaders(response.headers || {});
+        response = { ...response, headers: responseHeaders };
         performanceClient?.addFields({
             refreshTokenSize: response.body.refresh_token?.length || 0,
             httpVerToken: responseHeaders[HeaderNames.X_MS_HTTP_VERSION] || "",
@@ -47768,16 +48897,16 @@ async function sendPostRequest(thumbprint, tokenEndpoint, options, correlationId
     }
     catch (e) {
         if (e instanceof NetworkError) {
-            const responseHeaders = e.responseHeaders;
+            const responseHeaders = e.responseHeaders
+                ? normalizeResponseHeaders(e.responseHeaders)
+                : undefined;
             if (responseHeaders) {
                 performanceClient?.addFields({
                     httpVerToken: responseHeaders[HeaderNames.X_MS_HTTP_VERSION] ||
                         "",
                     requestId: responseHeaders[HeaderNames.X_MS_REQUEST_ID] || "",
-                    contentTypeHeader: responseHeaders[HeaderNames.CONTENT_TYPE] ||
-                        undefined,
-                    contentLengthHeader: responseHeaders[HeaderNames.CONTENT_LENGTH] ||
-                        undefined,
+                    contentTypeHeader: getResponseHeader(responseHeaders, HeaderNames.CONTENT_TYPE) || undefined,
+                    contentLengthHeader: getResponseHeader(responseHeaders, HeaderNames.CONTENT_LENGTH) || undefined,
                     httpStatus: e.httpStatus,
                 }, correlationId);
             }
@@ -47794,7 +48923,7 @@ async function sendPostRequest(thumbprint, tokenEndpoint, options, correlationId
     return response;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -47886,6 +49015,7 @@ class AuthorizationCodeClient {
             }
         }
         const headers = createTokenRequestHeaders(this.logger, this.config.systemOptions.preventCorsPreflight, ccsCredential || request.ccsCredential);
+        await addDpopTokenProofHeader(headers, request, endpoint, this.cryptoUtils, this.config.tokenBindingKeyManager);
         const thumbprint = getRequestThumbprint(this.config.authOptions.clientId, request);
         return invokeAsync(executePostToTokenEndpoint, AuthorizationCodeClientExecutePostToTokenEndpoint, this.logger, this.performanceClient, request.correlationId)(endpoint, requestBody, headers, thumbprint, request.correlationId, this.cacheManager, this.networkClient, this.logger, this.performanceClient, serverTelemetryManager);
     }
@@ -48037,6 +49167,9 @@ class AuthorizationCodeClient {
         if (request.logoutHint) {
             addLogoutHint(parameters, request.logoutHint);
         }
+        if (request.popupOriginCheckDone) {
+            addPopupOriginCheckDone(parameters);
+        }
         if (request.extraQueryParameters) {
             addExtraParameters(parameters, request.extraQueryParameters);
         }
@@ -48057,7 +49190,7 @@ class AuthorizationCodeClient {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -48184,6 +49317,9 @@ function getStandardAuthorizeRequestParameters(authOptions, request, logger, per
             !Object.keys(request.extraQueryParameters).includes(INSTANCE_AWARE))) {
         addInstanceAware(parameters);
     }
+    if (request.popupOriginCheckDone) {
+        addPopupOriginCheckDone(parameters);
+    }
     return parameters;
 }
 /**
@@ -48208,7 +49344,7 @@ function extractLoginHint(account) {
     return account.loginHint || account.idTokenClaims?.login_hint || null;
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -48319,6 +49455,12 @@ class RefreshTokenClient {
                 type: CcsCredentialType.HOME_ACCOUNT_ID,
             },
         };
+        if (refreshTokenRequest.authenticationScheme ===
+            AuthenticationScheme.DPOP &&
+            !refreshTokenRequest.dpopJkt) {
+            const dpopProofGenerator = new DpopProofGenerator(this.cryptoUtils, this.config.tokenBindingKeyManager);
+            refreshTokenRequest.dpopJkt = await dpopProofGenerator.generateJkt(request.correlationId);
+        }
         try {
             return await invokeAsync(this.acquireToken.bind(this), RefreshTokenClientAcquireToken, this.logger, this.performanceClient, request.correlationId)(refreshTokenRequest, apiId);
         }
@@ -48344,6 +49486,7 @@ class RefreshTokenClient {
         const endpoint = UrlString.appendQueryString(authority.tokenEndpoint, queryParametersString);
         const requestBody = await invokeAsync(this.createTokenRequestBody.bind(this), RefreshTokenClientCreateTokenRequestBody, this.logger, this.performanceClient, request.correlationId)(request);
         const headers = createTokenRequestHeaders(this.logger, this.config.systemOptions.preventCorsPreflight, request.ccsCredential);
+        await addDpopTokenProofHeader(headers, request, endpoint, this.cryptoUtils, this.config.tokenBindingKeyManager);
         const thumbprint = getRequestThumbprint(this.config.authOptions.clientId, request);
         return invokeAsync(executePostToTokenEndpoint, RefreshTokenClientExecutePostToTokenEndpoint, this.logger, this.performanceClient, request.correlationId)(endpoint, requestBody, headers, thumbprint, request.correlationId, this.cacheManager, this.networkClient, this.logger, this.performanceClient, this.serverTelemetryManager);
     }
@@ -48360,6 +49503,7 @@ class RefreshTokenClient {
             addRedirectUri(parameters, request.redirectUri);
         }
         addScopes(parameters, request.scopes, request.correlationId, true, this.config.authOptions.authority.options.OIDCOptions?.defaultScopes);
+        addResource(parameters, request.resource);
         addGrantType(parameters, GrantType.REFRESH_TOKEN_GRANT);
         addClientInfo(parameters);
         addLibraryInfo(parameters, this.config.libraryInfo);
@@ -48435,7 +49579,7 @@ class RefreshTokenClient {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -48701,7 +49845,7 @@ class ServerTelemetryManager {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -48770,6 +49914,22 @@ class SilentFlowClient {
             lastCacheOutcome = CacheOutcome.PROACTIVELY_REFRESHED;
             // don't throw ClientAuthError.createRefreshRequiredError(), return cached token instead
         }
+        const cachedAccessTokenType = cachedAccessToken.tokenType?.toLowerCase();
+        if (cachedAccessTokenType === AuthenticationScheme.DPOP.toLowerCase()) {
+            if (!cachedAccessToken.keyId) {
+                this.logger.info("SilentFlowClient:acquireCachedToken - Cached DPoP access token is missing keyId; refresh required", request.correlationId);
+                this.setCacheOutcome(CacheOutcome.NO_CACHED_ACCESS_TOKEN, request.correlationId);
+                throw createClientAuthError(tokenRefreshRequired, request.correlationId);
+            }
+            try {
+                await this.config.tokenBindingKeyManager.getTokenBindingPublicKeyJwk(cachedAccessToken.keyId, request.correlationId);
+            }
+            catch {
+                this.logger.info("SilentFlowClient:acquireCachedToken - Local DPoP key was not found for cached access token; refresh required", request.correlationId);
+                this.setCacheOutcome(CacheOutcome.NO_CACHED_ACCESS_TOKEN, request.correlationId);
+                throw createClientAuthError(tokenRefreshRequired, request.correlationId);
+            }
+        }
         const environment = request.authority || this.authority.getPreferredCache();
         const cacheRecord = {
             account: this.cacheManager.getAccount(this.cacheManager.generateAccountKey(request.account), request.correlationId),
@@ -48812,7 +49972,7 @@ class SilentFlowClient {
     }
 }
 
-/*! @azure/msal-common v16.13.0 2026-08-18 */
+/*! @azure/msal-common v16.16.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -48845,7 +50005,7 @@ function containsResourceParam(params) {
     return Object.prototype.hasOwnProperty.call(params, "resource");
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49020,7 +50180,7 @@ class Deserializer {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 /**
  * http methods
  */
@@ -49103,7 +50263,7 @@ const LOOPBACK_SERVER_CONSTANTS = {
     TIMEOUT_MS: 5000,
 };
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49270,7 +50430,7 @@ function getFetchHeaders(options) {
     return headers;
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49304,6 +50464,10 @@ const NodeAuthErrorMessage = {
         code: "loopback_server_timeout",
         desc: "Timed out waiting for auth code listener to be registered.",
     },
+    loopbackServerQueryResponseNotSupported: {
+        code: "loopback_server_query_response_not_supported",
+        desc: "The loopback server received an OAuth response in the URL. Interactive authentication requires form_post.",
+    },
     stateNotFoundError: {
         code: "state_not_found",
         desc: "State not found. Please verify that the request originated from msal.",
@@ -49315,6 +50479,10 @@ const NodeAuthErrorMessage = {
     redirectUriNotSupported: {
         code: "redirect_uri_not_supported",
         desc: "RedirectUri is not supported in this scenario. Please remove redirectUri from the request.",
+    },
+    unsupportedCcaInstanceAware: {
+        code: "unsupported_cca_instance_aware",
+        desc: "Instance-aware configuration is not supported by ConfidentialClientApplication.",
     },
 };
 class NodeAuthError extends AuthError {
@@ -49359,6 +50527,12 @@ class NodeAuthError extends AuthError {
         return new NodeAuthError(NodeAuthErrorMessage.loopbackServerTimeout.code, correlationId, `${NodeAuthErrorMessage.loopbackServerTimeout.desc}`);
     }
     /**
+     * Creates an error thrown if the loopback server receives an OAuth response in a query string.
+     */
+    static createLoopbackServerQueryResponseNotSupportedError() {
+        return new NodeAuthError(NodeAuthErrorMessage.loopbackServerQueryResponseNotSupported.code, "", NodeAuthErrorMessage.loopbackServerQueryResponseNotSupported.desc);
+    }
+    /**
      * Creates an error thrown when the state is not present.
      */
     static createStateNotFoundError(correlationId = "") {
@@ -49376,9 +50550,15 @@ class NodeAuthError extends AuthError {
     static createRedirectUriNotSupportedError(correlationId = "") {
         return new NodeAuthError(NodeAuthErrorMessage.redirectUriNotSupported.code, correlationId, NodeAuthErrorMessage.redirectUriNotSupported.desc);
     }
+    /**
+     * Creates an error thrown when instance-aware behavior is requested for a confidential client.
+     */
+    static createUnsupportedCcaInstanceAwareError(correlationId = "") {
+        return new NodeAuthError(NodeAuthErrorMessage.unsupportedCcaInstanceAware.code, correlationId, NodeAuthErrorMessage.unsupportedCcaInstanceAware.desc);
+    }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49457,7 +50637,7 @@ function buildAppConfiguration({ auth, broker, cache, system, telemetry, }) {
     };
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49469,7 +50649,7 @@ class GuidGenerator {
      * cryptographic pseudorandom number generator.
      */
     generateGuid() {
-        return randomUUID$2();
+        return randomUUID$1();
     }
     /**
      * verifies if a string is  GUID
@@ -49481,7 +50661,7 @@ class GuidGenerator {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49528,7 +50708,7 @@ class EncodingUtils {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49544,7 +50724,7 @@ class HashUtils {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49598,7 +50778,7 @@ class PkceGenerator {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49692,7 +50872,7 @@ class CryptoProvider {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49768,7 +50948,7 @@ function generateAccountKey(account) {
     return accountKey.join(CACHE.KEY_SEPARATOR).toLowerCase();
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -49780,7 +50960,7 @@ function generateAccountKey(account) {
  */
 class NodeStorage extends CacheManager {
     constructor(logger, clientId, cryptoImpl, staticAuthorityOptions) {
-        super(clientId, cryptoImpl, logger, new StubPerformanceClient(), staticAuthorityOptions);
+        super(clientId, cryptoImpl, logger, new StubPerformanceClient(), staticAuthorityOptions, DEFAULT_TOKEN_BINDING_KEY_MANAGER);
         this.cache = {};
         this.changeEmitters = [];
         this.logger = logger;
@@ -50195,7 +51375,7 @@ class NodeStorage extends CacheManager {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -50499,7 +51679,7 @@ function requireSafeBuffer () {
 	hasRequiredSafeBuffer = 1;
 	(function (module, exports) {
 		/* eslint-disable node/no-deprecated-api */
-		var buffer = require$$0$8;
+		var buffer = require$$0$7;
 		var Buffer = buffer.Buffer;
 
 		// alternative to using Object.keys for old browsers
@@ -50865,8 +52045,8 @@ var hasRequiredBufferEqualConstantTime;
 function requireBufferEqualConstantTime () {
 	if (hasRequiredBufferEqualConstantTime) return bufferEqualConstantTime;
 	hasRequiredBufferEqualConstantTime = 1;
-	var Buffer = require$$0$8.Buffer; // browserify
-	var SlowBuffer = require$$0$8.SlowBuffer;
+	var Buffer = require$$0$7.Buffer; // browserify
+	var SlowBuffer = require$$0$7.SlowBuffer;
 
 	bufferEqualConstantTime = bufferEq;
 
@@ -51188,7 +52368,7 @@ var hasRequiredTostring;
 function requireTostring () {
 	if (hasRequiredTostring) return tostring;
 	hasRequiredTostring = 1;
-	var Buffer = require$$0$8.Buffer;
+	var Buffer = require$$0$7.Buffer;
 
 	tostring = function toString(obj) {
 	  if (typeof obj === 'string')
@@ -51616,6 +52796,35 @@ function requireConstants () {
 	// the shortest version with a build 0.0.0+BUILD.
 	const MAX_SAFE_BUILD_LENGTH = MAX_LENGTH - 6;
 
+	// ECMAScript whitespace and line terminators matched by \s.
+	const WHITESPACE_CHARACTERS = [
+	  '\t',
+	  '\n',
+	  '\v',
+	  '\f',
+	  '\r',
+	  ' ',
+	  '\u00a0',
+	  '\u1680',
+	  '\u2000',
+	  '\u2001',
+	  '\u2002',
+	  '\u2003',
+	  '\u2004',
+	  '\u2005',
+	  '\u2006',
+	  '\u2007',
+	  '\u2008',
+	  '\u2009',
+	  '\u200a',
+	  '\u2028',
+	  '\u2029',
+	  '\u202f',
+	  '\u205f',
+	  '\u3000',
+	  '\ufeff',
+	];
+
 	const RELEASE_TYPES = [
 	  'major',
 	  'premajor',
@@ -51631,6 +52840,7 @@ function requireConstants () {
 	  MAX_SAFE_COMPONENT_LENGTH,
 	  MAX_SAFE_BUILD_LENGTH,
 	  MAX_SAFE_INTEGER,
+	  WHITESPACE_CHARACTERS,
 	  RELEASE_TYPES,
 	  SEMVER_SPEC_VERSION,
 	  FLAG_INCLUDE_PRERELEASE: 0b001,
@@ -52920,6 +54130,451 @@ function requireLrucache () {
 	return lrucache;
 }
 
+var trimComparatorWhitespace_1;
+var hasRequiredTrimComparatorWhitespace;
+
+function requireTrimComparatorWhitespace () {
+	if (hasRequiredTrimComparatorWhitespace) return trimComparatorWhitespace_1;
+	hasRequiredTrimComparatorWhitespace = 1;
+
+	// Reproduce safeRe[COMPARATORTRIM] replacement boundaries, not version
+	// validation. Each end-index finder returns an exclusive end, or its start
+	// on no match.
+	// Positions count from zero. An end of 3 means characters 0, 1, and 2 were read;
+	// range.slice(start, end) gives the matched text, not a converted number.
+	const {
+	  MAX_LENGTH,
+	  MAX_SAFE_BUILD_LENGTH,
+	  WHITESPACE_CHARACTERS,
+	} = requireConstants();
+
+	/**
+	 * Remembers the last two rows of digits so their characters need not be reread.
+	 * Positions start at -1 until a row has been found.
+	 *
+	 * @typedef {object} DigitRunCache
+	 * @property {number} start The first character of the most recently found row.
+	 * @property {number} end The position after that row's last character.
+	 * @property {number} previousStart The first character of the previous row.
+	 * @property {number} previousEnd The position after the previous row.
+	 */
+
+	// One entry per UTF-16 code unit keeps membership checks constant-time.
+	const whitespace = new Uint8Array(0x10000);
+	for (const char of WHITESPACE_CHARACTERS) {
+	  whitespace[char.charCodeAt(0)] = 1;
+	}
+
+	/**
+	 * Checks whether a character is whitespace, like a space, tab, or newline.
+	 * Looking past the end of the string returns false.
+	 *
+	 * @param {string|undefined} char One character, or undefined past the string's end.
+	 * @returns {boolean} Whether the character is whitespace.
+	 * @example isWhitespace(' ') // true
+	 * @example isWhitespace('1') // false
+	 */
+	const isWhitespace = char =>
+	  char !== undefined && whitespace[char.charCodeAt(0)] === 1;
+
+	/**
+	 * Checks for v, =, or whitespace before the version number.
+	 * These are historical version prefixes, not range operators:
+	 * < and > are handled separately, as are tilde and caret ranges.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character can belong to a version prefix.
+	 * @example isVersionPrefix('=') // true
+	 * @example isVersionPrefix('>') // false
+	 */
+	const isVersionPrefix = char =>
+	  char === 'v' ||
+	  char === '=' ||
+	  isWhitespace(char);
+
+	/**
+	 * Checks whether a character is one of the digits 0 through 9.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character is an ASCII digit.
+	 * @example isDigit('7') // true
+	 * @example isDigit('.') // false
+	 */
+	const isDigit = char => char !== undefined && char >= '0' && char <= '9';
+
+	/**
+	 * Checks whether a character is an English letter, uppercase or lowercase.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character is an ASCII letter.
+	 * @example isLetter('b') // true
+	 * @example isLetter('7') // false
+	 */
+	const isLetter = char =>
+	  char !== undefined && (
+	    (char >= 'a' && char <= 'z') ||
+	    (char >= 'A' && char <= 'Z')
+	  );
+
+	/**
+	 * Checks for a letter, digit, or hyphen: the characters allowed inside
+	 * prerelease and build names such as beta-1.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character can be part of an identifier.
+	 * @example isIdentifierCharacter('-') // true
+	 * @example isIdentifierCharacter('.') // false; dots separate identifiers
+	 */
+	const isIdentifierCharacter = char => isDigit(char) || isLetter(char) || char === '-';
+
+	/**
+	 * Checks whether a version component can begin here: with a digit or
+	 * a wildcard such as x, X, or *.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether a number or wildcard can start with this character.
+	 * @example isVersionStart('x') // true
+	 * @example isVersionStart('v') // false; v belongs to the prefix
+	 */
+	const isVersionStart = char =>
+	  isDigit(char) ||
+	  char === 'x' ||
+	  char === 'X' ||
+	  char === '*';
+
+	/**
+	 * Finds the end of a row of digits, but returns no more than limit digits.
+	 * Remembers the last two rows so looking at them again does not reread them.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of the first character to check.
+	 * @param {number} limit The most digit characters the returned match can include.
+	 * @param {DigitRunCache} digitRuns Shared cache of digit-run positions, updated in place.
+	 * @returns {number} The position after the matched digits, or start if none match.
+	 * @example findDigitsEndIndex('123abc', 0, 10, digitRuns) // 3, pointing at a
+	 * @example findDigitsEndIndex('123abc', 0, 2, digitRuns) // 2, pointing at the unread 3
+	 */
+	const findDigitsEndIndex = (range, start, limit, digitRuns) => {
+	  if (!isDigit(range[start])) {
+	    return start
+	  }
+	  if (start >= digitRuns.start && start < digitRuns.end) {
+	    return Math.min(start + limit, digitRuns.end)
+	  }
+	  if (start >= digitRuns.previousStart && start < digitRuns.previousEnd) {
+	    return Math.min(start + limit, digitRuns.previousEnd)
+	  }
+	  let end = start + 1;
+	  while (isDigit(range[end])) {
+	    end++;
+	  }
+	  // A failed full version can rewind from its second run to its first.
+	  digitRuns.previousStart = digitRuns.start;
+	  digitRuns.previousEnd = digitRuns.end;
+	  digitRuns.start = start;
+	  digitRuns.end = end;
+	  return Math.min(start + limit, end)
+	};
+
+	/**
+	 * Reads a number using the old regex's length and leading-zero rules.
+	 * Strict mode reads just the first zero in 012; loose mode can read all three.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the number should begin.
+	 * @param {boolean} loose Whether to allow leading zeros.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched digits, not their numeric value.
+	 * @example findVersionNumberEndIndex('012', 0, false, digitRuns) // 1
+	 * @example findVersionNumberEndIndex('012', 0, true, digitRuns) // 3
+	 */
+	const findVersionNumberEndIndex = (range, start, loose, digitRuns) => {
+	  if (!loose && range[start] === '0') {
+	    return start + 1
+	  }
+	  // Strict syntax allows an initial nonzero digit plus MAX_LENGTH digits.
+	  return findDigitsEndIndex(range, start, loose ? MAX_LENGTH : MAX_LENGTH + 1, digitRuns)
+	};
+
+	/**
+	 * Reads one piece of a prerelease name, such as beta or 1 in beta.1.
+	 * Tries the letter-or-hyphen form first, then the number-only form.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the identifier should begin.
+	 * @param {boolean} loose Whether numeric identifiers may have leading zeros.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the identifier, or start if none matches.
+	 * @example findPrereleaseIdentifierEndIndex('beta.1', 0, false, digitRuns) // 4, at the dot
+	 * @example findPrereleaseIdentifierEndIndex('001beta', 0, false, digitRuns) // 7
+	 */
+	const findPrereleaseIdentifierEndIndex = (range, start, loose, digitRuns) => {
+	  const digitsEnd = findDigitsEndIndex(range, start, MAX_LENGTH, digitRuns);
+	  // The legacy regex tries a nonnumeric identifier before a numeric one.
+	  if (isLetter(range[digitsEnd]) || range[digitsEnd] === '-') {
+	    let end = digitsEnd + 1;
+	    const limit = end + MAX_SAFE_BUILD_LENGTH;
+	    while (end < limit && isIdentifierCharacter(range[end])) {
+	      end++;
+	    }
+	    return end
+	  }
+	  return findVersionNumberEndIndex(range, start, loose, digitRuns)
+	};
+
+	/**
+	 * Reads a prerelease suffix such as -beta.1, one dot-separated piece at a time.
+	 * Loose mode also allows the name without its opening hyphen.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the suffix should begin, including -.
+	 * @param {boolean} loose Whether the opening hyphen is optional and zeros allowed.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched suffix, or start if absent.
+	 * @example findPrereleaseEndIndex('-beta.1+sha', 0, false, digitRuns) // 7, at the plus
+	 * @example findPrereleaseEndIndex('beta', 0, false, digitRuns) // 0; no opening hyphen
+	 */
+	const findPrereleaseEndIndex = (range, start, loose, digitRuns) => {
+	  const hyphen = range[start] === '-';
+	  if (!loose && !hyphen) {
+	    return start
+	  }
+	  const identifierStart = start + (hyphen ? 1 : 0);
+	  let end = findPrereleaseIdentifierEndIndex(range, identifierStart, loose, digitRuns);
+	  if (end === identifierStart) {
+	    if (!loose || !hyphen) {
+	      return start
+	    }
+	    // In loose syntax, a lone hyphen can itself be the identifier.
+	    end = findPrereleaseIdentifierEndIndex(range, start, loose, digitRuns);
+	  }
+	  while (range[end] === '.') {
+	    const next = findPrereleaseIdentifierEndIndex(range, end + 1, loose, digitRuns);
+	    if (next === end + 1) {
+	      break
+	    }
+	    end = next;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads one build-name piece, such as sha or 123 in +sha.123.
+	 * Stops at a disallowed character or the old regex's length limit.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the identifier should begin.
+	 * @returns {number} The position after the identifier, or start if none matches.
+	 * @example findBuildIdentifierEndIndex('sha.123', 0) // 3, at the dot
+	 * @example findBuildIdentifierEndIndex('001', 0) // 3; leading zeros are allowed
+	 */
+	const findBuildIdentifierEndIndex = (range, start) => {
+	  let end = start;
+	  while (end - start < MAX_SAFE_BUILD_LENGTH && isIdentifierCharacter(range[end])) {
+	    end++;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads optional build metadata such as +sha.123.
+	 * Leaves the position unchanged if there is no plus sign followed by a name.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the opening + should be.
+	 * @returns {number} The position after the matched metadata, or start if absent.
+	 * @example findBuildEndIndex('+sha.123 <2', 0) // 8, at the space
+	 * @example findBuildEndIndex('+', 0) // 0; a plus sign alone is not a match
+	 */
+	const findBuildEndIndex = (range, start) => {
+	  if (range[start] !== '+') {
+	    return start
+	  }
+	  let end = findBuildIdentifierEndIndex(range, start + 1);
+	  if (end === start + 1) {
+	    return start
+	  }
+	  while (range[end] === '.') {
+	    const next = findBuildIdentifierEndIndex(range, end + 1);
+	    if (next === end + 1) {
+	      break
+	    }
+	    end = next;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads three numbers separated by dots, then any prerelease and build suffixes.
+	 * Uses loose rules, so forms such as 01.02.03beta can match here.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of the first number, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the version match, or start if none matches.
+	 * @example findLooseFullVersionEndIndex('1.2.3-beta+sha <2', 0, digitRuns) // 14
+	 * @example findLooseFullVersionEndIndex('1.2', 0, digitRuns) // 0; needs three numbers
+	 */
+	const findLooseFullVersionEndIndex = (range, start, digitRuns) => {
+	  let end = start;
+	  for (let component = 0; component < 3; component++) {
+	    const next = findVersionNumberEndIndex(range, end, true, digitRuns);
+	    if (next === end) {
+	      return start
+	    }
+	    end = next;
+	    if (component < 2) {
+	      if (range[end] !== '.') {
+	        return start
+	      }
+	      end++;
+	    }
+	  }
+	  const prereleaseEnd = findPrereleaseEndIndex(range, end, true, digitRuns);
+	  return findBuildEndIndex(range, prereleaseEnd)
+	};
+
+	/**
+	 * Reads one component of a partial or wildcard version, such as 2 or x in 2.x.
+	 * Numbers use strict leading-zero rules; wildcards take up one character.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the component should begin.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the component, or start if none matches.
+	 * @example findPartialVersionComponentEndIndex('2.x', 0, digitRuns) // 1, at the dot
+	 * @example findPartialVersionComponentEndIndex('2.x', 2, digitRuns) // 3, after x
+	 */
+	const findPartialVersionComponentEndIndex = (range, start, digitRuns) => {
+	  if (isDigit(range[start])) {
+	    return findVersionNumberEndIndex(range, start, false, digitRuns)
+	  }
+	  return isVersionStart(range[start]) ? start + 1 : start
+	};
+
+	/**
+	 * Reads up to three components, allowing forms such as 1, 1.2, or 1.x.
+	 * After the third component, also reads any strict prerelease and build suffixes.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of a number or wildcard, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched version text.
+	 * @example findPartialVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+	 * @example findPartialVersionEndIndex('1.', 0, digitRuns) // 1; the trailing dot is unread
+	 */
+	const findPartialVersionEndIndex = (range, start, digitRuns) => {
+	  let end = findPartialVersionComponentEndIndex(range, start, digitRuns);
+	  for (let component = 0; component < 2; component++) {
+	    if (range[end] !== '.') {
+	      return end
+	    }
+	    const next = findPartialVersionComponentEndIndex(range, end + 1, digitRuns);
+	    if (next === end + 1) {
+	      return end
+	    }
+	    end = next;
+	  }
+	  const prereleaseEnd = findPrereleaseEndIndex(range, end, false, digitRuns);
+	  return findBuildEndIndex(range, prereleaseEnd)
+	};
+
+	/**
+	 * Finds where a version match ends, without deciding whether the range is valid.
+	 * Tries a loose full version first, then a partial or wildcard version, just
+	 * like the old regex's LOOSEPLAIN and XRANGEPLAIN alternatives.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of a number or wildcard, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position where scanning the next candidate can resume.
+	 * @example findVersionEndIndex('1.2.3 <2', 0, digitRuns) // 5, at the space
+	 * @example findVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+	 */
+	const findVersionEndIndex = (range, start, digitRuns) => {
+	  const fullVersionEnd = findLooseFullVersionEndIndex(range, start, digitRuns);
+	  return fullVersionEnd !== start
+	    ? fullVersionEnd
+	    : findPartialVersionEndIndex(range, start, digitRuns)
+	};
+
+	/**
+	 * Finds the one whitespace character the old replacement would remove.
+	 * Keeps leading whitespace, skips an optional operator, and checks immediately
+	 * after it. Returns -1 if there is nothing to remove.
+	 *
+	 * @param {string} range The text containing a candidate already found by the caller.
+	 * @param {number} matchStart The candidate's position, including leading whitespace.
+	 * @returns {number} The position of the removable whitespace, or -1 if absent.
+	 * @example findRemovableWhitespaceIndex(' > 1', 0) // 2; keep the space at position 0
+	 * @example findRemovableWhitespaceIndex('>1', 0) // -1
+	 */
+	const findRemovableWhitespaceIndex = (range, matchStart) => {
+	  let position = matchStart;
+	  if (isWhitespace(range[position])) {
+	    position++;
+	  }
+	  if (range[position] === '<' || range[position] === '>') {
+	    position++;
+	  }
+	  if (range[position] === '=') {
+	    position++;
+	  }
+	  return isWhitespace(range[position]) ? position : -1
+	};
+
+	/**
+	 * Joins an operator to its version, turning > 1.2.3 into >1.2.3.
+	 * Copies everything else according to the old regex's matching rules.
+	 * Moves forward through prefixes and whole versions to avoid repeatedly
+	 * searching the same characters on long inputs.
+	 *
+	 * @param {string} range The range text to process; the original string is unchanged.
+	 * @returns {string} The range with matched operator whitespace removed.
+	 * @example trimComparatorWhitespace('> 1.2.3 < 2') // '>1.2.3 <2'
+	 * @example trimComparatorWhitespace('> invalid') // '> invalid'
+	 */
+	const trimComparatorWhitespace = range => {
+	  let result = '';
+	  let copyFrom = 0;
+	  let cursor = 0;
+	  const digitRuns = { start: -1, end: -1, previousStart: -1, previousEnd: -1 };
+
+	  while (cursor < range.length) {
+	    const matchStart = cursor;
+	    if (range[cursor] === '<' || range[cursor] === '>') {
+	      cursor++;
+	    } else if (!isVersionPrefix(range[cursor]) && !isVersionStart(range[cursor])) {
+	      cursor++;
+	      continue
+	    }
+
+	    // Consume a v/=/whitespace run once, even when no version follows it.
+	    while (cursor < range.length && isVersionPrefix(range[cursor])) {
+	      cursor++;
+	    }
+	    if (!isVersionStart(range[cursor])) {
+	      continue
+	    }
+
+	    const whitespacePosition = findRemovableWhitespaceIndex(range, matchStart);
+	    if (whitespacePosition !== -1) {
+	      result += range.slice(copyFrom, whitespacePosition);
+	      copyFrom = whitespacePosition + 1;
+	    }
+
+	    // Skip the entire match, so a prerelease's trailing v cannot be
+	    // reconsidered as the prefix of another version.
+	    cursor = findVersionEndIndex(range, cursor, digitRuns);
+	  }
+
+	  return result + range.slice(copyFrom)
+	};
+
+	trimComparatorWhitespace_1 = trimComparatorWhitespace;
+	return trimComparatorWhitespace_1;
+}
+
 var range;
 var hasRequiredRange;
 
@@ -53046,7 +54701,7 @@ function requireRange () {
 	    debug('hyphen replace', range);
 
 	    // `> 1.2.3 < 1.2.5` => `>1.2.3 <1.2.5`
-	    range = range.replace(re[t.COMPARATORTRIM], comparatorTrimReplace);
+	    range = trimComparatorWhitespace(range);
 	    debug('comparator trim', range);
 
 	    // `~ 1.2.3` => `~1.2.3`
@@ -53151,11 +54806,11 @@ function requireRange () {
 	const Comparator = requireComparator();
 	const debug = requireDebug();
 	const SemVer = requireSemver$1();
+	const trimComparatorWhitespace = requireTrimComparatorWhitespace();
 	const {
 	  safeRe: re,
 	  src,
 	  t,
-	  comparatorTrimReplace,
 	  tildeTrimReplace,
 	  caretTrimReplace,
 	} = requireRe();
@@ -56820,7 +58475,7 @@ function requireJsonwebtoken () {
 var jsonwebtokenExports = requireJsonwebtoken();
 var jwt = /*@__PURE__*/getDefaultExportFromCjs(jsonwebtokenExports);
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License.
@@ -56836,7 +58491,7 @@ const deviceCodePollingCancelled = "device_code_polling_cancelled";
 const deviceCodeExpired = "device_code_expired";
 const deviceCodeUnknownError = "device_code_unknown_error";
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -56982,12 +58637,12 @@ class ClientAssertion {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 /* eslint-disable header/header */
 const name = "@azure/msal-node";
-const version = "5.6.0";
+const version = "7.2.1";
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57050,7 +58705,7 @@ class BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57150,7 +58805,7 @@ class UsernamePasswordClient extends BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57187,7 +58842,128 @@ function getAuthCodeRequestUrl(config, authority, request, logger) {
     return getAuthorizeUrl(authority, parameters);
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
+
+/*
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License.
+ */
+const activeSilentTokenRequests = new WeakMap();
+/**
+ * Shares an in-flight silent acquisition while preserving each caller's correlation ID.
+ */
+function acquireTokenSilentDeduped(owner, logger, silentRequestKey, correlationId, acquireToken) {
+    const existingRequests = activeSilentTokenRequests.get(owner);
+    const activeRequests = existingRequests || new Map();
+    if (!existingRequests) {
+        activeSilentTokenRequests.set(owner, activeRequests);
+    }
+    const inProgressRequest = activeRequests.get(silentRequestKey);
+    if (inProgressRequest) {
+        logger.verbose("acquireTokenSilent has been called previously, returning the result from the first call", correlationId);
+        return applyCallerCorrelationIdToResult(inProgressRequest, correlationId);
+    }
+    logger.verbose("acquireTokenSilent called for the first time, storing active request", correlationId);
+    const activeRequest = Promise.resolve()
+        .then(acquireToken)
+        .finally(() => {
+        activeRequests.delete(silentRequestKey);
+        if (activeRequests.size === 0) {
+            activeSilentTokenRequests.delete(owner);
+        }
+    });
+    activeRequests.set(silentRequestKey, activeRequest);
+    return applyCallerCorrelationIdToResult(activeRequest, correlationId);
+}
+/**
+ * Builds the key used to identify equivalent in-progress silent requests.
+ */
+function getSilentRequestKey(input) {
+    const { request } = input;
+    const authority = input.requestType === "native" ? request.authority : input.authority;
+    const commonKeyFields = {
+        requestType: input.requestType,
+        clientId: input.requestType === "native"
+            ? input.request.clientId
+            : input.clientId,
+        authority,
+        scopes: canonicalizeRequestValues(request.scopes),
+        claims: request.claims,
+        authenticationScheme: request.authenticationScheme,
+        resourceRequestMethod: request.resourceRequestMethod,
+        resourceRequestUri: request.resourceRequestUri,
+        forceRefresh: request.forceRefresh,
+        redirectUri: request.redirectUri || "",
+        resource: request.resource,
+        extraParameters: canonicalizeRequestValues(request.extraParameters),
+    };
+    if (input.requestType === "native") {
+        return JSON.stringify({
+            ...commonKeyFields,
+            accountId: input.request.accountId,
+            shrNonce: input.request.shrNonce,
+            extraScopesToConsent: canonicalizeRequestValues(input.request.extraScopesToConsent),
+            loginHint: input.request.loginHint,
+            prompt: input.request.prompt,
+        });
+    }
+    const nonNativeRequest = input.request;
+    const thumbprint = getRequestThumbprint(input.clientId, { ...nonNativeRequest, authority }, nonNativeRequest.account.homeAccountId);
+    return JSON.stringify({
+        ...thumbprint,
+        ...commonKeyFields,
+        accountTenantId: nonNativeRequest.account.tenantId,
+        accountEnvironment: nonNativeRequest.account.environment,
+        refreshTokenExpirationOffsetSeconds: nonNativeRequest.refreshTokenExpirationOffsetSeconds,
+        extraQueryParameters: canonicalizeRequestValues(nonNativeRequest.extraQueryParameters),
+        skipBrokerClaims: thumbprint.embeddedClientId ||
+            nonNativeRequest.extraParameters?.[BROKER_CLIENT_ID]
+            ? nonNativeRequest.skipBrokerClaims
+            : undefined,
+    });
+}
+/**
+ * Copies mutable native request values so execution cannot diverge from the stored key.
+ */
+function snapshotNativeRequest(request) {
+    return {
+        ...request,
+        scopes: [...request.scopes],
+        extraParameters: request.extraParameters
+            ? { ...request.extraParameters }
+            : undefined,
+        extraScopesToConsent: request.extraScopesToConsent
+            ? [...request.extraScopesToConsent]
+            : undefined,
+    };
+}
+/**
+ * Canonicalizes scope sets and request dictionaries without changing the outgoing request.
+ */
+function canonicalizeRequestValues(values) {
+    if (Array.isArray(values)) {
+        return Array.from(new Set(values
+            .map((scope) => scope.trim())
+            .filter((scope) => scope.length > 0))).sort();
+    }
+    return values
+        ? Object.keys(values)
+            .sort()
+            .map((key) => [key, values[key]])
+        : undefined;
+}
+/**
+ * Applies the caller's correlation ID to successful results.
+ * Shared failures retain the original error and underlying operation correlation ID.
+ */
+function applyCallerCorrelationIdToResult(activeRequest, correlationId) {
+    return activeRequest.then((result) => ({
+        ...result,
+        correlationId,
+    }));
+}
+
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57249,13 +59025,14 @@ class ClientApplication {
                 state: "",
             };
         }
-        if (request.nonce) {
-            validatedAuthCodePayload = {
-                ...validatedAuthCodePayload,
-                code: request.code,
-                nonce: request.nonce,
-            };
-        }
+        const expectedNonce = request.nonce !== undefined
+            ? request.nonce
+            : validatedAuthCodePayload?.nonce;
+        validatedAuthCodePayload = {
+            ...validatedAuthCodePayload,
+            code: request.code,
+            nonce: expectedNonce,
+        };
         const validRequest = {
             ...request,
             ...(await this.initializeBaseRequest(request)),
@@ -57312,6 +59089,7 @@ class ClientApplication {
      *
      * This API expects the user to provide an account object and looks into the cache to retrieve the token if present.
      * There is also an optional "forceRefresh" boolean the user can send to bypass the cache for access_token and id_token.
+     * Concurrent requests with the same request thumbprint return the same in-progress result.
      * In case the refresh_token is expired or not found, an error is thrown
      * and the guidance is for the user to call any interactive token acquisition API (eg: `acquireTokenByCode()`).
      */
@@ -57321,9 +59099,22 @@ class ClientApplication {
             ...(await this.initializeBaseRequest(request)),
             forceRefresh: request.forceRefresh || false,
         };
+        if (!validRequest.account) {
+            return this.acquireTokenSilentAsync(validRequest, request.azureCloudOptions);
+        }
+        const authorityForThumbprint = Authority.generateAuthority(validRequest.authority, request.azureCloudOptions || this.config.auth.azureCloudOptions);
+        const silentRequestKey = getSilentRequestKey({
+            requestType: "non-native",
+            request: validRequest,
+            authority: authorityForThumbprint,
+            clientId: this.config.auth.clientId,
+        });
+        return acquireTokenSilentDeduped(this, this.logger, silentRequestKey, validRequest.correlationId, () => this.acquireTokenSilentAsync(validRequest, request.azureCloudOptions));
+    }
+    async acquireTokenSilentAsync(validRequest, azureCloudOptions) {
         const serverTelemetryManager = this.initializeServerTelemetryManager(ApiId.acquireTokenSilent, validRequest.correlationId, validRequest.forceRefresh);
         try {
-            const discoveredAuthority = await this.createAuthority(validRequest.authority, validRequest.correlationId, undefined, request.azureCloudOptions);
+            const discoveredAuthority = await this.createAuthority(validRequest.authority, validRequest.correlationId, undefined, azureCloudOptions);
             const clientConfiguration = await this.buildOauthClientConfiguration(discoveredAuthority, validRequest.correlationId, validRequest.redirectUri || "", serverTelemetryManager);
             const silentFlowClient = new SilentFlowClient(clientConfiguration, new StubPerformanceClient());
             this.logger.verbose("Silent flow client created", validRequest.correlationId);
@@ -57559,7 +59350,7 @@ class ClientApplication {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57571,16 +59362,20 @@ class LoopbackClient {
     }
     /**
      * Spins up a loopback server which returns the server response when the localhost redirectUri is hit
+     * @param expectedState - State sent in the authorization request
      * @param successTemplate
      * @param errorTemplate
      * @returns
      */
-    async listenForAuthCode(successTemplate, errorTemplate) {
+    async listenForAuthCode(expectedState, successTemplate, errorTemplate) {
         if (this.server) {
             throw NodeAuthError.createLoopbackServerAlreadyExistsError();
         }
+        if (!expectedState) {
+            throw NodeAuthError.createStateNotFoundError("");
+        }
         return new Promise((resolve, reject) => {
-            this.server = http.createServer((req, res) => {
+            this.server = http__default.createServer((req, res) => {
                 const method = req.method?.toUpperCase();
                 // Only allow GET and POST methods
                 if (method !== "GET" && method !== "POST") {
@@ -57599,7 +59394,7 @@ class LoopbackClient {
                 }
                 else if (url === FORWARD_SLASH) {
                     if (method === "POST") {
-                        this.handlePostRequest(req, res, resolve, successTemplate, errorTemplate);
+                        this.handlePostRequest(req, res, resolve, expectedState, successTemplate, errorTemplate);
                         return;
                     }
                     // GET to root — return success page (after redirect)
@@ -57607,28 +59402,28 @@ class LoopbackClient {
                         "Auth code was successfully acquired. You can close this window now.");
                     return;
                 }
-                // GET with query params (existing query response_mode flow)
+                /*
+                 * GET requests may load the success page or browser resources, but OAuth
+                 * responses must be delivered via form_post.
+                 */
                 if (method === "GET") {
                     const redirectUri = this.getRedirectUri();
                     const parsedUrl = new URL(url, redirectUri);
                     const authCodeResponse = getDeserializedResponse(parsedUrl.search) || {};
                     if (!authCodeResponse.code && !authCodeResponse.error) {
-                        // Ignore requests without OAuth params (e.g., /favicon.ico)
+                        // Ignore requests without OAuth params (e.g., /favicon.ico).
                         res.writeHead(200);
                         res.end();
                         return;
                     }
-                    if (authCodeResponse.code) {
-                        res.writeHead(HTTP_REDIRECT, {
-                            location: redirectUri,
-                        }); // Prevent auth code from being saved in the browser history
-                        res.end();
+                    if (!this.isExpectedState(parsedUrl.searchParams, expectedState)) {
+                        res.writeHead(400);
+                        res.end("Invalid authorization response state.");
+                        return;
                     }
-                    if (authCodeResponse.error) {
-                        res.end(errorTemplate ||
-                            `Error occurred: ${authCodeResponse.error}`);
-                    }
-                    resolve(authCodeResponse);
+                    res.writeHead(400);
+                    res.end("OAuth responses must use form_post and cannot be returned in the URL.");
+                    reject(NodeAuthError.createLoopbackServerQueryResponseNotSupportedError());
                 }
                 else {
                     // Non-root POST (no OAuth response expected here) — ignore
@@ -57658,7 +59453,7 @@ class LoopbackClient {
     /**
      * Handles POST requests for form_post response mode
      */
-    handlePostRequest(req, res, resolve, successTemplate, errorTemplate) {
+    handlePostRequest(req, res, resolve, expectedState, successTemplate, errorTemplate) {
         const contentType = req.headers["content-type"]?.split(";")[0]?.trim();
         if (contentType !== "application/x-www-form-urlencoded") {
             res.writeHead(415);
@@ -57683,6 +59478,12 @@ class LoopbackClient {
                 res.end();
                 return;
             }
+            // Unrelated callbacks must not settle or cancel the pending sign-in.
+            if (!this.isExpectedState(new URLSearchParams(body), expectedState)) {
+                res.writeHead(400);
+                res.end("Invalid authorization response state.");
+                return;
+            }
             if (authCodeResponse.error) {
                 res.writeHead(200);
                 res.end(errorTemplate || `Error occurred: ${authCodeResponse.error}`);
@@ -57694,6 +59495,13 @@ class LoopbackClient {
             }
             resolve(authCodeResponse);
         });
+    }
+    /**
+     * Requires exactly one state value matching the pending authorization request.
+     */
+    isExpectedState(parameters, expectedState) {
+        const states = parameters.getAll("state");
+        return states.length === 1 && states[0] === expectedState;
     }
     /**
      * Get the port that the loopback server is running on
@@ -57730,7 +59538,7 @@ class LoopbackClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -57895,7 +59703,7 @@ class DeviceCodeClient extends BaseClient {
                 // user authorization is pending. Sleep for polling interval and try again
                 if (response.body.error === AUTHORIZATION_PENDING) {
                     this.logger.info("Authorization pending. Continue polling.", request.correlationId);
-                    await delay$2(pollingIntervalMilli);
+                    await delay(pollingIntervalMilli);
                 }
                 else {
                     // for any other error, throw
@@ -57945,7 +59753,7 @@ class DeviceCodeClient extends BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -58026,10 +59834,7 @@ class PublicClientApplication extends ClientApplication {
         const correlationId = request.correlationId || this.cryptoProvider.createNewGuid();
         this.logger.trace("acquireTokenInteractive called", correlationId);
         enforceResourceParameter(this.config.auth.isMcp, request);
-        const { openBrowser, successTemplate, errorTemplate, windowHandle, loopbackClient: customLoopbackClient, preferredPort, ...remainingProperties } = request;
-        if (customLoopbackClient) {
-            this.logger.warning("The loopbackClient option is deprecated and will be removed in a future major version. Omit it to use the built-in loopback server, and set preferredPort when a fixed port is required.", correlationId);
-        }
+        const { openBrowser, successTemplate, errorTemplate, windowHandle, preferredPort, ...remainingProperties } = request;
         if (this.nativeBrokerPlugin) {
             const brokerRequest = {
                 ...remainingProperties,
@@ -58056,19 +59861,20 @@ class PublicClientApplication extends ClientApplication {
             request.redirectUri = "";
         }
         const { verifier, challenge } = await this.cryptoProvider.generatePkceCodes();
-        const loopbackClient = customLoopbackClient || new LoopbackClient(preferredPort);
-        // Validate and resolve responseMode
-        const responseMode = remainingProperties.responseMode ??
-            ResponseMode.QUERY;
-        if (responseMode !== ResponseMode.QUERY &&
+        const loopbackClient = new LoopbackClient(preferredPort);
+        const responseMode = remainingProperties.responseMode;
+        if (responseMode !== undefined &&
             responseMode !== ResponseMode.FORM_POST) {
             throw createClientConfigurationError(invalidResponseMode, correlationId);
         }
+        const state = setRequestState(this.cryptoProvider, remainingProperties.state
+            ? this.cryptoProvider.base64Encode(remainingProperties.state)
+            : remainingProperties.state, undefined, correlationId);
         let authCodeResponse = {};
         let authCodeListenerError = null;
         try {
             const authCodeListener = loopbackClient
-                .listenForAuthCode(successTemplate, errorTemplate)
+                .listenForAuthCode(state, successTemplate, errorTemplate)
                 .then((response) => {
                 authCodeResponse = response;
             })
@@ -58083,9 +59889,10 @@ class PublicClientApplication extends ClientApplication {
                 correlationId: correlationId,
                 scopes: request.scopes || OIDC_DEFAULT_SCOPES,
                 redirectUri: redirectUri,
-                responseMode: responseMode,
+                responseMode: ResponseMode.FORM_POST,
                 codeChallenge: challenge,
                 codeChallengeMethod: CodeChallengeMethodValues.S256,
+                state,
             };
             const authCodeUrl = await this.getAuthCodeUrl(validRequest);
             await openBrowser(authCodeUrl);
@@ -58093,6 +59900,7 @@ class PublicClientApplication extends ClientApplication {
             if (authCodeListenerError) {
                 throw authCodeListenerError;
             }
+            this.validateState(state, authCodeResponse.state || "", correlationId);
             if (authCodeResponse.error) {
                 throw new ServerError(authCodeResponse.error, correlationId, authCodeResponse.error_description, authCodeResponse.suberror);
             }
@@ -58105,6 +59913,7 @@ class PublicClientApplication extends ClientApplication {
                 codeVerifier: verifier,
                 clientInfo: clientInfo || "",
                 ...validRequest,
+                state: remainingProperties.state,
             };
             return await this.acquireTokenByCode(tokenRequest); // Await this so the server doesn't close prematurely
         }
@@ -58122,7 +59931,8 @@ class PublicClientApplication extends ClientApplication {
         this.logger.trace("acquireTokenSilent called", correlationId);
         enforceResourceParameter(this.config.auth.isMcp, request);
         if (this.nativeBrokerPlugin) {
-            const brokerRequest = {
+            const nativeBrokerPlugin = this.nativeBrokerPlugin;
+            const brokerRequest = snapshotNativeRequest({
                 ...request,
                 clientId: this.config.auth.clientId,
                 scopes: request.scopes || OIDC_DEFAULT_SCOPES,
@@ -58136,8 +59946,12 @@ class PublicClientApplication extends ClientApplication {
                 },
                 accountId: request.account.nativeAccountId,
                 forceRefresh: request.forceRefresh || false,
-            };
-            return this.nativeBrokerPlugin.acquireTokenSilent(brokerRequest);
+            });
+            const silentRequestKey = getSilentRequestKey({
+                requestType: "native",
+                request: brokerRequest,
+            });
+            return acquireTokenSilentDeduped(this, this.logger, silentRequestKey, correlationId, () => nativeBrokerPlugin.acquireTokenSilent(brokerRequest));
         }
         if (request.redirectUri) {
             // If it's not a broker fallback scenario, we throw an error
@@ -58194,7 +60008,7 @@ class PublicClientApplication extends ClientApplication {
     }
     /**
      * Attempts to retrieve the redirectUri from the loopback server. If the loopback server does not start listening for requests within the timeout this will throw.
-     * @param loopbackClient - developer provided custom loopback server implementation
+     * @param loopbackClient - built-in loopback server implementation
      * @param correlationId - correlation id of the request
      * @returns
      */
@@ -58232,7 +60046,7 @@ class PublicClientApplication extends ClientApplication {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -58472,7 +60286,7 @@ class ClientCredentialClient extends BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -58705,7 +60519,7 @@ class OnBehalfOfClient extends BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -58812,7 +60626,7 @@ class UserFederatedIdentityCredentialClient extends BaseClient {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 
 /*
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -58845,6 +60659,10 @@ class ConfidentialClientApplication extends ClientApplication {
      * @param Configuration - configuration object for the MSAL ConfidentialClientApplication instance
      */
     constructor(configuration) {
+        if ("instanceAware" in configuration.auth &&
+            configuration.auth.instanceAware === true) {
+            throw NodeAuthError.createUnsupportedCcaInstanceAwareError();
+        }
         super(configuration);
         const clientSecretNotEmpty = !!this.config.auth.clientSecret;
         const clientAssertionNotEmpty = !!this.config.auth.clientAssertion;
@@ -58885,6 +60703,29 @@ class ConfidentialClientApplication extends ClientApplication {
                 this.config.auth.clientCertificate.thumbprint, this.config.auth.clientCertificate.privateKey, this.config.auth.clientCertificate.x5c);
         }
         this.appTokenProvider = undefined;
+    }
+    /**
+     * Creates the URL of the authorization request.
+     */
+    async getAuthCodeUrl(request) {
+        if (request.extraQueryParameters &&
+            Object.prototype.hasOwnProperty.call(request.extraQueryParameters, "instance_aware")) {
+            throw NodeAuthError.createUnsupportedCcaInstanceAwareError(request.correlationId);
+        }
+        return super.getAuthCodeUrl(request);
+    }
+    /**
+     * Acquires a token by exchanging an authorization code.
+     */
+    async acquireTokenByCode(request, authCodePayload) {
+        const sanitizedAuthCodePayload = authCodePayload
+            ? {
+                code: request.code,
+                state: authCodePayload.state,
+                nonce: request.nonce,
+            }
+            : undefined;
+        return super.acquireTokenByCode(request, sanitizedAuthCodePayload);
     }
     /**
      * This extensibility point only works for the client_credential flow, i.e. acquireTokenByClientCredential and
@@ -59049,7 +60890,7 @@ class ConfidentialClientApplication extends ClientApplication {
     }
 }
 
-/*! @azure/msal-node v5.6.0 2026-08-18 */
+/*! @azure/msal-node v7.2.1 2026-11-06 */
 ({
     win32: `${process.env["ProgramData"]}\\AzureConnectedMachineAgent\\Tokens\\`});
 ({
@@ -59057,402 +60898,7 @@ class ConfidentialClientApplication extends ClientApplication {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-/**
- * Returns a random integer value between a lower and upper bound,
- * inclusive of both bounds.
- * Note that this uses Math.random and isn't secure. If you need to use
- * this for any kind of security purpose, find a better source of random.
- * @param min - The smallest integer value allowed.
- * @param max - The largest integer value allowed.
- */
-function getRandomIntegerInclusive(min, max) {
-    // Make sure inputs are integers.
-    min = Math.ceil(min);
-    max = Math.floor(max);
-    // Pick a random offset from zero to the size of the range.
-    // Since Math.random() can never return 1, we have to make the range one larger
-    // in order to be inclusive of the maximum value after we take the floor.
-    const offset = Math.floor(Math.random() * (max - min + 1));
-    return offset + min;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Calculates the delay interval for retry attempts using exponential delay with jitter.
- * @param retryAttempt - The current retry attempt number.
- * @param config - The exponential retry configuration.
- * @returns An object containing the calculated retry delay.
- */
-function calculateRetryDelay(retryAttempt, config) {
-    // Exponentially increase the delay each time
-    const exponentialDelay = config.retryDelayInMs * Math.pow(2, retryAttempt);
-    // Don't let the delay exceed the maximum
-    const clampedDelay = Math.min(config.maxRetryDelayInMs, exponentialDelay);
-    // Allow the final value to have some "jitter" (within 50% of the delay size) so
-    // that retries across multiple clients don't occur simultaneously.
-    const retryAfterInMs = clampedDelay / 2 + getRandomIntegerInclusive(0, clampedDelay / 2);
-    return { retryAfterInMs };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Helper to determine when an input is a generic JS object.
- * @returns true when input is an object type that is not null, Array, RegExp, or Date.
- */
-function isObject(input) {
-    return (typeof input === "object" &&
-        input !== null &&
-        !Array.isArray(input) &&
-        !(input instanceof RegExp) &&
-        !(input instanceof Date));
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Typeguard for an error object shape (has name and message)
- * @param e - Something caught by a catch clause.
- */
-function isError$1(e) {
-    if (isObject(e)) {
-        const hasName = typeof e.name === "string";
-        const hasMessage = typeof e.message === "string";
-        return hasName && hasMessage;
-    }
-    return false;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Generated Universally Unique Identifier
- *
- * @returns RFC4122 v4 UUID.
- */
-function randomUUID() {
-    return globalThis.crypto.randomUUID();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The helper that transforms bytes with specific character encoding into string
- * @param bytes - the uint8array bytes
- * @param format - the format we use to encode the byte
- * @returns a string of the encoded string
- */
-/**
- * The helper that transforms string to specific character encoded bytes array.
- * @param value - the string to be converted
- * @param format - the format we use to decode the value
- * @returns a uint8array
- */
-function stringToUint8Array(value, format) {
-    return Buffer.from(value, format);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const RedactedString = "REDACTED";
-// Make sure this list is up-to-date with the one under core/logger/Readme#Keyconcepts
-const defaultAllowedHeaderNames = [
-    "x-ms-client-request-id",
-    "x-ms-return-client-request-id",
-    "x-ms-useragent",
-    "x-ms-correlation-request-id",
-    "x-ms-request-id",
-    "client-request-id",
-    "ms-cv",
-    "return-client-request-id",
-    "traceparent",
-    "Access-Control-Allow-Credentials",
-    "Access-Control-Allow-Headers",
-    "Access-Control-Allow-Methods",
-    "Access-Control-Allow-Origin",
-    "Access-Control-Expose-Headers",
-    "Access-Control-Max-Age",
-    "Access-Control-Request-Headers",
-    "Access-Control-Request-Method",
-    "Origin",
-    "Accept",
-    "Accept-Encoding",
-    "Cache-Control",
-    "Connection",
-    "Content-Length",
-    "Content-Type",
-    "Date",
-    "ETag",
-    "Expires",
-    "If-Match",
-    "If-Modified-Since",
-    "If-None-Match",
-    "If-Unmodified-Since",
-    "Last-Modified",
-    "Pragma",
-    "Request-Id",
-    "Retry-After",
-    "Server",
-    "Transfer-Encoding",
-    "User-Agent",
-    "WWW-Authenticate",
-];
-const defaultAllowedQueryParameters = ["api-version"];
-/**
- * A utility class to sanitize objects for logging.
- */
-class Sanitizer {
-    allowedHeaderNames;
-    allowedQueryParameters;
-    constructor({ additionalAllowedHeaderNames: allowedHeaderNames = [], additionalAllowedQueryParameters: allowedQueryParameters = [], } = {}) {
-        allowedHeaderNames = defaultAllowedHeaderNames.concat(allowedHeaderNames);
-        allowedQueryParameters = defaultAllowedQueryParameters.concat(allowedQueryParameters);
-        this.allowedHeaderNames = new Set(allowedHeaderNames.map((n) => n.toLowerCase()));
-        this.allowedQueryParameters = new Set(allowedQueryParameters.map((p) => p.toLowerCase()));
-    }
-    /**
-     * Sanitizes an object for logging.
-     * @param obj - The object to sanitize
-     * @returns - The sanitized object as a string
-     */
-    sanitize(obj) {
-        const seen = new Set();
-        return JSON.stringify(obj, (key, value) => {
-            // Ensure Errors include their interesting non-enumerable members
-            if (value instanceof Error) {
-                return {
-                    ...value,
-                    name: value.name,
-                    message: value.message,
-                };
-            }
-            if (key === "headers" && isObject(value)) {
-                return this.sanitizeHeaders(value);
-            }
-            else if (key === "url" && typeof value === "string") {
-                return this.sanitizeUrl(value);
-            }
-            else if (key === "query" && isObject(value)) {
-                return this.sanitizeQuery(value);
-            }
-            else if (key === "body") {
-                // Don't log the request body
-                return undefined;
-            }
-            else if (key === "response") {
-                // Don't log response again
-                return undefined;
-            }
-            else if (key === "operationSpec") {
-                // When using sendOperationRequest, the request carries a massive
-                // field with the autorest spec. No need to log it.
-                return undefined;
-            }
-            else if (Array.isArray(value) || isObject(value)) {
-                if (seen.has(value)) {
-                    return "[Circular]";
-                }
-                seen.add(value);
-            }
-            return value;
-        }, 2);
-    }
-    /**
-     * Sanitizes a URL for logging.
-     * @param value - The URL to sanitize
-     * @returns - The sanitized URL as a string
-     */
-    sanitizeUrl(value) {
-        if (typeof value !== "string" || value === null || value === "") {
-            return value;
-        }
-        const url = new URL(value);
-        if (!url.search) {
-            return value;
-        }
-        for (const [key] of url.searchParams) {
-            if (!this.allowedQueryParameters.has(key.toLowerCase())) {
-                url.searchParams.set(key, RedactedString);
-            }
-        }
-        return url.toString();
-    }
-    sanitizeHeaders(obj) {
-        const sanitized = {};
-        for (const key of Object.keys(obj)) {
-            if (this.allowedHeaderNames.has(key.toLowerCase())) {
-                sanitized[key] = obj[key];
-            }
-            else {
-                sanitized[key] = RedactedString;
-            }
-        }
-        return sanitized;
-    }
-    sanitizeQuery(value) {
-        if (typeof value !== "object" || value === null) {
-            return value;
-        }
-        const sanitized = {};
-        for (const k of Object.keys(value)) {
-            if (this.allowedQueryParameters.has(k.toLowerCase())) {
-                sanitized[k] = value[k];
-            }
-            else {
-                sanitized[k] = RedactedString;
-            }
-        }
-        return sanitized;
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * This error is thrown when an asynchronous operation has been aborted.
- * Check for this error by testing the `name` that the name property of the
- * error matches `"AbortError"`.
- *
- * @example
- * ```ts snippet:AbortErrorSample
- * import { AbortError } from "@azure/abort-controller";
- *
- * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
- *   if (options.abortSignal.aborted) {
- *     throw new AbortError();
- *   }
- *
- *   // do async work
- * }
- *
- * const controller = new AbortController();
- * controller.abort();
- * try {
- *   doAsyncWork({ abortSignal: controller.signal });
- * } catch (e) {
- *   if (e instanceof Error && e.name === "AbortError") {
- *     // handle abort error here.
- *   }
- * }
- * ```
- */
-let AbortError$1 = class AbortError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = "AbortError";
-    }
-};
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates an abortable promise.
- * @param buildPromise - A function that takes the resolve and reject functions as parameters.
- * @param options - The options for the abortable promise.
- * @returns A promise that can be aborted.
- */
-function createAbortablePromise(buildPromise, options) {
-    const { cleanupBeforeAbort, abortSignal, abortErrorMsg } = options ?? {};
-    return new Promise((resolve, reject) => {
-        function rejectOnAbort() {
-            reject(new AbortError$1(abortErrorMsg ?? "The operation was aborted."));
-        }
-        function removeListeners() {
-            abortSignal?.removeEventListener("abort", onAbort);
-        }
-        function onAbort() {
-            cleanupBeforeAbort?.();
-            removeListeners();
-            rejectOnAbort();
-        }
-        if (abortSignal?.aborted) {
-            return rejectOnAbort();
-        }
-        try {
-            buildPromise((x) => {
-                removeListeners();
-                resolve(x);
-            }, (x) => {
-                removeListeners();
-                reject(x);
-            });
-        }
-        catch (err) {
-            reject(err);
-        }
-        abortSignal?.addEventListener("abort", onAbort);
-    });
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const StandardAbortMessage$1 = "The delay was aborted.";
-/**
- * A wrapper for setTimeout that resolves a promise after timeInMs milliseconds.
- * @param timeInMs - The number of milliseconds to be delayed.
- * @param options - The options for delay - currently abort options
- * @returns Promise that is resolved after timeInMs
- */
-function delay$1(timeInMs, options) {
-    let token;
-    const { abortSignal, abortErrorMsg } = {};
-    return createAbortablePromise((resolve) => {
-        token = setTimeout(resolve, timeInMs);
-    }, {
-        cleanupBeforeAbort: () => clearTimeout(token),
-        abortSignal,
-        abortErrorMsg: abortErrorMsg ?? StandardAbortMessage$1,
-    });
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Given what is thought to be an error object, return the message if possible.
- * If the message is missing, returns a stringified version of the input.
- * @param e - Something thrown from a try block
- * @returns The error message or a string of the input
- */
-function getErrorMessage(e) {
-    if (isError$1(e)) {
-        return e.message;
-    }
-    else {
-        let stringified;
-        try {
-            if (typeof e === "object" && e) {
-                stringified = JSON.stringify(e);
-            }
-            else {
-                stringified = String(e);
-            }
-        }
-        catch (err) {
-            stringified = "[unable to stringify input]";
-        }
-        return `Unknown error ${stringified}`;
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Typeguard for an error object shape (has name and message)
- *
- * @param e - Something caught by a catch clause.
- */
-function isError(e) {
-    return isError$1(e);
-}
-/**
- * A constant that indicates whether the environment the code is running is a Node.js compatible environment.
- */
-const isNodeLike = isNodeLike$1;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const logger$4 = credentialLogger("IdentityUtils");
+const logger$1 = credentialLogger("IdentityUtils");
 /**
  * Latest AuthenticationRecord version
  */
@@ -59463,7 +60909,7 @@ const LatestAuthenticationRecordVersion = "1.0";
  */
 function ensureValidMsalToken(scopes, msalToken, getTokenOptions) {
     const error = (message) => {
-        logger$4.getToken.info(message);
+        logger$1.getToken.info(message);
         return new AuthenticationRequiredError({
             scopes: Array.isArray(scopes) ? scopes : [scopes],
             getTokenOptions,
@@ -59479,19 +60925,6 @@ function ensureValidMsalToken(scopes, msalToken, getTokenOptions) {
     if (!msalToken.accessToken) {
         throw error(`Response had no "accessToken" property.`);
     }
-}
-/**
- * Returns the authority host from either the options bag or the AZURE_AUTHORITY_HOST environment variable.
- *
- * Defaults to {@link DefaultAuthorityHost}.
- * @internal
- */
-function getAuthorityHost(options) {
-    let authorityHost = options?.authorityHost;
-    if (!authorityHost && isNodeLike) {
-        authorityHost = process.env.AZURE_AUTHORITY_HOST;
-    }
-    return authorityHost ?? DefaultAuthorityHost;
 }
 /**
  * Generates a valid authority by combining a host with a tenantId.
@@ -59576,17 +61009,17 @@ function handleMsalError(scopes, error, getTokenOptions) {
         const msalError = error;
         switch (msalError.errorCode) {
             case "endpoints_resolution_error":
-                logger$4.info(formatError(scopes, error.message));
+                logger$1.info(formatError(scopes, error.message));
                 return new CredentialUnavailableError(error.message);
             case "device_code_polling_cancelled":
                 return new AbortError$1("The authentication has been aborted by the caller.");
             case "consent_required":
             case "interaction_required":
             case "login_required":
-                logger$4.info(formatError(scopes, `Authentication returned errorCode ${msalError.errorCode}`));
+                logger$1.info(formatError(scopes, `Authentication returned errorCode ${msalError.errorCode}`));
                 break;
             default:
-                logger$4.info(formatError(scopes, `Failed to acquire token: ${error.message}`));
+                logger$1.info(formatError(scopes, `Failed to acquire token: ${error.message}`));
                 break;
         }
     }
@@ -59597,10 +61030,15 @@ function handleMsalError(scopes, error, getTokenOptions) {
         return error;
     }
     if (error.name === "NativeAuthError") {
-        logger$4.info(formatError(scopes, `Error from the native broker: ${error.message} with status code: ${error.statusCode}`));
+        logger$1.info(formatError(scopes, `Error from the native broker: ${error.message} with status code: ${error.statusCode}`));
         return error;
     }
-    return new AuthenticationRequiredError({ scopes, getTokenOptions, message: error.message });
+    return new AuthenticationRequiredError({
+        scopes,
+        getTokenOptions,
+        message: error.message,
+        cause: error,
+    });
 }
 // transformations
 function publicToMsal(account) {
@@ -59622,3907 +61060,6 @@ function msalToPublic(clientId, account) {
         version: LatestAuthenticationRecordVersion,
     };
     return record;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Default key used to access the XML attributes.
- */
-const XML_ATTRKEY = "$";
-/**
- * Default key used to access the XML value content.
- */
-const XML_CHARKEY = "_";
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A type guard for a primitive response body.
- * @param value - Value to test
- *
- * @internal
- */
-function isPrimitiveBody(value, mapperTypeName) {
-    return (mapperTypeName !== "Composite" &&
-        mapperTypeName !== "Dictionary" &&
-        (typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean" ||
-            mapperTypeName?.match(/^(Date|DateTime|DateTimeRfc1123|UnixTime|ByteArray|Base64Url)$/i) !==
-                null ||
-            value === undefined ||
-            value === null));
-}
-/**
- * Maps the response as follows:
- * - wraps the response body if needed (typically if its type is primitive).
- * - returns null if the combination of the headers and the body is empty.
- * - otherwise, returns the combination of the headers and the body.
- *
- * @param responseObject - a representation of the parsed response
- * @returns the response that will be returned to the user which can be null and/or wrapped
- *
- * @internal
- */
-function handleNullableResponseAndWrappableBody(responseObject) {
-    const combinedHeadersAndBody = {
-        ...responseObject.headers,
-        ...responseObject.body,
-    };
-    if (responseObject.hasNullableType &&
-        Object.getOwnPropertyNames(combinedHeadersAndBody).length === 0) {
-        return responseObject.shouldWrapBody ? { body: null } : null;
-    }
-    else {
-        return responseObject.shouldWrapBody
-            ? {
-                ...responseObject.headers,
-                body: responseObject.body,
-            }
-            : combinedHeadersAndBody;
-    }
-}
-/**
- * Take a `FullOperationResponse` and turn it into a flat
- * response object to hand back to the consumer.
- * @param fullResponse - The processed response from the operation request
- * @param responseSpec - The response map from the OperationSpec
- *
- * @internal
- */
-function flattenResponse(fullResponse, responseSpec) {
-    const parsedHeaders = fullResponse.parsedHeaders;
-    // head methods never have a body, but we return a boolean set to body property
-    // to indicate presence/absence of the resource
-    if (fullResponse.request.method === "HEAD") {
-        return {
-            ...parsedHeaders,
-            body: fullResponse.parsedBody,
-        };
-    }
-    const bodyMapper = responseSpec && responseSpec.bodyMapper;
-    const isNullable = Boolean(bodyMapper?.nullable);
-    const expectedBodyTypeName = bodyMapper?.type.name;
-    /** If the body is asked for, we look at the expected body type to handle it */
-    if (expectedBodyTypeName === "Stream") {
-        return {
-            ...parsedHeaders,
-            blobBody: fullResponse.blobBody,
-            readableStreamBody: fullResponse.readableStreamBody,
-        };
-    }
-    const modelProperties = (expectedBodyTypeName === "Composite" &&
-        bodyMapper.type.modelProperties) ||
-        {};
-    const isPageableResponse = Object.keys(modelProperties).some((k) => modelProperties[k].serializedName === "");
-    if (expectedBodyTypeName === "Sequence" || isPageableResponse) {
-        const arrayResponse = fullResponse.parsedBody ?? [];
-        for (const key of Object.keys(modelProperties)) {
-            if (modelProperties[key].serializedName) {
-                arrayResponse[key] = fullResponse.parsedBody?.[key];
-            }
-        }
-        if (parsedHeaders) {
-            for (const key of Object.keys(parsedHeaders)) {
-                arrayResponse[key] = parsedHeaders[key];
-            }
-        }
-        return isNullable &&
-            !fullResponse.parsedBody &&
-            !parsedHeaders &&
-            Object.getOwnPropertyNames(modelProperties).length === 0
-            ? null
-            : arrayResponse;
-    }
-    return handleNullableResponseAndWrappableBody({
-        body: fullResponse.parsedBody,
-        headers: parsedHeaders,
-        hasNullableType: isNullable,
-        shouldWrapBody: isPrimitiveBody(fullResponse.parsedBody, expectedBodyTypeName),
-    });
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Known types of Mappers
- */
-const MapperTypeNames = {
-    Base64Url: "Base64Url",
-    Boolean: "Boolean",
-    ByteArray: "ByteArray",
-    Composite: "Composite",
-    Date: "Date",
-    DateTime: "DateTime",
-    DateTimeRfc1123: "DateTimeRfc1123",
-    Dictionary: "Dictionary",
-    Enum: "Enum",
-    Number: "Number",
-    Object: "Object",
-    Sequence: "Sequence",
-    String: "String",
-    Stream: "Stream",
-    TimeSpan: "TimeSpan",
-    UnixTime: "UnixTime",
-};
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * This error is thrown when an asynchronous operation has been aborted.
- * Check for this error by testing the `name` that the name property of the
- * error matches `"AbortError"`.
- *
- * @example
- * ```ts snippet:ReadmeSampleAbortError
- * import { AbortError } from "@typespec/ts-http-runtime";
- *
- * async function doAsyncWork(options: { abortSignal: AbortSignal }): Promise<void> {
- *   if (options.abortSignal.aborted) {
- *     throw new AbortError();
- *   }
- *
- *   // do async work
- * }
- *
- * const controller = new AbortController();
- * controller.abort();
- *
- * try {
- *   doAsyncWork({ abortSignal: controller.signal });
- * } catch (e) {
- *   if (e instanceof Error && e.name === "AbortError") {
- *     // handle abort error here.
- *   }
- * }
- * ```
- */
-class AbortError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = "AbortError";
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function normalizeName(name) {
-    return name.toLowerCase();
-}
-/**
- * Removes CR and LF characters from a header value to prevent obs-fold
- * (line folding) sequences, as forbidden by RFC 7230 §3.2.4.
- * @param value - The header value to sanitize.
- */
-function normalizeValue(value) {
-    return String(value)
-        .trim()
-        .replace(/[\r\n]/g, "");
-}
-function* headerIterator(map) {
-    for (const entry of map.values()) {
-        yield [entry.name, entry.value];
-    }
-}
-class HttpHeadersImpl {
-    _headersMap;
-    constructor(rawHeaders) {
-        this._headersMap = new Map();
-        if (rawHeaders) {
-            for (const headerName of Object.keys(rawHeaders)) {
-                this.set(headerName, rawHeaders[headerName]);
-            }
-        }
-    }
-    /**
-     * Set a header in this collection with the provided name and value. The name is
-     * case-insensitive.
-     * @param name - The name of the header to set. This value is case-insensitive.
-     * @param value - The value of the header to set.
-     */
-    set(name, value) {
-        this._headersMap.set(normalizeName(name), { name, value: normalizeValue(value) });
-    }
-    /**
-     * Get the header value for the provided header name, or undefined if no header exists in this
-     * collection with the provided name.
-     * @param name - The name of the header. This value is case-insensitive.
-     */
-    get(name) {
-        return this._headersMap.get(normalizeName(name))?.value;
-    }
-    /**
-     * Get whether or not this header collection contains a header entry for the provided header name.
-     * @param name - The name of the header to set. This value is case-insensitive.
-     */
-    has(name) {
-        return this._headersMap.has(normalizeName(name));
-    }
-    /**
-     * Remove the header with the provided headerName.
-     * @param name - The name of the header to remove.
-     */
-    delete(name) {
-        this._headersMap.delete(normalizeName(name));
-    }
-    /**
-     * Get the JSON object representation of this HTTP header collection.
-     */
-    toJSON(options = {}) {
-        const result = {};
-        if (options.preserveCase) {
-            for (const entry of this._headersMap.values()) {
-                result[entry.name] = entry.value;
-            }
-        }
-        else {
-            for (const [normalizedName, entry] of this._headersMap) {
-                result[normalizedName] = entry.value;
-            }
-        }
-        return result;
-    }
-    /**
-     * Get the string representation of this HTTP header collection.
-     */
-    toString() {
-        return JSON.stringify(this.toJSON({ preserveCase: true }));
-    }
-    /**
-     * Iterate over tuples of header [name, value] pairs.
-     */
-    [Symbol.iterator]() {
-        return headerIterator(this._headersMap);
-    }
-}
-/**
- * Creates an object that satisfies the `HttpHeaders` interface.
- * @param rawHeaders - A simple object representing initial headers
- */
-function createHttpHeaders$1(rawHeaders) {
-    return new HttpHeadersImpl(rawHeaders);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-class PipelineRequestImpl {
-    url;
-    method;
-    headers;
-    timeout;
-    withCredentials;
-    body;
-    multipartBody;
-    formData;
-    streamResponseStatusCodes;
-    enableBrowserStreams;
-    proxySettings;
-    disableKeepAlive;
-    abortSignal;
-    requestId;
-    allowInsecureConnection;
-    onUploadProgress;
-    onDownloadProgress;
-    requestOverrides;
-    authSchemes;
-    constructor(options) {
-        this.url = options.url;
-        this.body = options.body;
-        this.headers = options.headers ?? createHttpHeaders$1();
-        this.method = options.method ?? "GET";
-        this.timeout = options.timeout ?? 0;
-        this.multipartBody = options.multipartBody;
-        this.formData = options.formData;
-        this.disableKeepAlive = options.disableKeepAlive ?? false;
-        this.proxySettings = options.proxySettings;
-        this.streamResponseStatusCodes = options.streamResponseStatusCodes;
-        this.withCredentials = options.withCredentials ?? false;
-        this.abortSignal = options.abortSignal;
-        this.onUploadProgress = options.onUploadProgress;
-        this.onDownloadProgress = options.onDownloadProgress;
-        this.requestId = options.requestId || randomUUID();
-        this.allowInsecureConnection = options.allowInsecureConnection ?? false;
-        this.enableBrowserStreams = options.enableBrowserStreams ?? false;
-        this.requestOverrides = options.requestOverrides;
-        this.authSchemes = options.authSchemes;
-    }
-}
-/**
- * Creates a new pipeline request with the given options.
- * This method is to allow for the easy setting of default values and not required.
- * @param options - The options to create the request with.
- */
-function createPipelineRequest$1(options) {
-    return new PipelineRequestImpl(options);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const ValidPhaseNames = new Set(["Deserialize", "Serialize", "Retry", "Sign"]);
-/**
- * A private implementation of Pipeline.
- * Do not export this class from the package.
- * @internal
- */
-class HttpPipeline {
-    _policies = [];
-    _orderedPolicies;
-    constructor(policies) {
-        this._policies = policies?.slice(0) ?? [];
-        this._orderedPolicies = undefined;
-    }
-    addPolicy(policy, options = {}) {
-        if (options.phase && options.afterPhase) {
-            throw new Error("Policies inside a phase cannot specify afterPhase.");
-        }
-        if (options.phase && !ValidPhaseNames.has(options.phase)) {
-            throw new Error(`Invalid phase name: ${options.phase}`);
-        }
-        if (options.afterPhase && !ValidPhaseNames.has(options.afterPhase)) {
-            throw new Error(`Invalid afterPhase name: ${options.afterPhase}`);
-        }
-        this._policies.push({
-            policy,
-            options,
-        });
-        this._orderedPolicies = undefined;
-    }
-    removePolicy(options) {
-        const removedPolicies = [];
-        this._policies = this._policies.filter((policyDescriptor) => {
-            if ((options.name && policyDescriptor.policy.name === options.name) ||
-                (options.phase && policyDescriptor.options.phase === options.phase)) {
-                removedPolicies.push(policyDescriptor.policy);
-                return false;
-            }
-            else {
-                return true;
-            }
-        });
-        this._orderedPolicies = undefined;
-        return removedPolicies;
-    }
-    sendRequest(httpClient, request) {
-        const policies = this.getOrderedPolicies();
-        const pipeline = policies.reduceRight((next, policy) => {
-            return (req) => {
-                return policy.sendRequest(req, next);
-            };
-        }, (req) => httpClient.sendRequest(req));
-        return pipeline(request);
-    }
-    getOrderedPolicies() {
-        if (!this._orderedPolicies) {
-            this._orderedPolicies = this.orderPolicies();
-        }
-        return this._orderedPolicies;
-    }
-    clone() {
-        return new HttpPipeline(this._policies);
-    }
-    static create() {
-        return new HttpPipeline();
-    }
-    orderPolicies() {
-        /**
-         * The goal of this method is to reliably order pipeline policies
-         * based on their declared requirements when they were added.
-         *
-         * Order is first determined by phase:
-         *
-         * 1. Serialize Phase
-         * 2. Policies not in a phase
-         * 3. Deserialize Phase
-         * 4. Retry Phase
-         * 5. Sign Phase
-         *
-         * Within each phase, policies are executed in the order
-         * they were added unless they were specified to execute
-         * before/after other policies or after a particular phase.
-         *
-         * To determine the final order, we will walk the policy list
-         * in phase order multiple times until all dependencies are
-         * satisfied.
-         *
-         * `afterPolicies` are the set of policies that must be
-         * executed before a given policy. This requirement is
-         * considered satisfied when each of the listed policies
-         * have been scheduled.
-         *
-         * `beforePolicies` are the set of policies that must be
-         * executed after a given policy. Since this dependency
-         * can be expressed by converting it into a equivalent
-         * `afterPolicies` declarations, they are normalized
-         * into that form for simplicity.
-         *
-         * An `afterPhase` dependency is considered satisfied when all
-         * policies in that phase have scheduled.
-         *
-         */
-        const result = [];
-        // Track all policies we know about.
-        const policyMap = new Map();
-        function createPhase(name) {
-            return {
-                name,
-                policies: new Set(),
-                hasRun: false,
-                hasAfterPolicies: false,
-            };
-        }
-        // Track policies for each phase.
-        const serializePhase = createPhase("Serialize");
-        const noPhase = createPhase("None");
-        const deserializePhase = createPhase("Deserialize");
-        const retryPhase = createPhase("Retry");
-        const signPhase = createPhase("Sign");
-        // a list of phases in order
-        const orderedPhases = [serializePhase, noPhase, deserializePhase, retryPhase, signPhase];
-        // Small helper function to map phase name to each Phase
-        function getPhase(phase) {
-            if (phase === "Retry") {
-                return retryPhase;
-            }
-            else if (phase === "Serialize") {
-                return serializePhase;
-            }
-            else if (phase === "Deserialize") {
-                return deserializePhase;
-            }
-            else if (phase === "Sign") {
-                return signPhase;
-            }
-            else {
-                return noPhase;
-            }
-        }
-        // First walk each policy and create a node to track metadata.
-        for (const descriptor of this._policies) {
-            const policy = descriptor.policy;
-            const options = descriptor.options;
-            const policyName = policy.name;
-            if (policyMap.has(policyName)) {
-                throw new Error("Duplicate policy names not allowed in pipeline");
-            }
-            const node = {
-                policy,
-                dependsOn: new Set(),
-                dependants: new Set(),
-            };
-            if (options.afterPhase) {
-                node.afterPhase = getPhase(options.afterPhase);
-                node.afterPhase.hasAfterPolicies = true;
-            }
-            policyMap.set(policyName, node);
-            const phase = getPhase(options.phase);
-            phase.policies.add(node);
-        }
-        // Now that each policy has a node, connect dependency references.
-        for (const descriptor of this._policies) {
-            const { policy, options } = descriptor;
-            const policyName = policy.name;
-            const node = policyMap.get(policyName);
-            if (!node) {
-                throw new Error(`Missing node for policy ${policyName}`);
-            }
-            if (options.afterPolicies) {
-                for (const afterPolicyName of options.afterPolicies) {
-                    const afterNode = policyMap.get(afterPolicyName);
-                    if (afterNode) {
-                        // Linking in both directions helps later
-                        // when we want to notify dependants.
-                        node.dependsOn.add(afterNode);
-                        afterNode.dependants.add(node);
-                    }
-                }
-            }
-            if (options.beforePolicies) {
-                for (const beforePolicyName of options.beforePolicies) {
-                    const beforeNode = policyMap.get(beforePolicyName);
-                    if (beforeNode) {
-                        // To execute before another node, make it
-                        // depend on the current node.
-                        beforeNode.dependsOn.add(node);
-                        node.dependants.add(beforeNode);
-                    }
-                }
-            }
-        }
-        function walkPhase(phase) {
-            phase.hasRun = true;
-            // Sets iterate in insertion order
-            for (const node of phase.policies) {
-                if (node.afterPhase && (!node.afterPhase.hasRun || node.afterPhase.policies.size)) {
-                    // If this node is waiting on a phase to complete,
-                    // we need to skip it for now.
-                    // Even if the phase is empty, we should wait for it
-                    // to be walked to avoid re-ordering policies.
-                    continue;
-                }
-                if (node.dependsOn.size === 0) {
-                    // If there's nothing else we're waiting for, we can
-                    // add this policy to the result list.
-                    result.push(node.policy);
-                    // Notify anything that depends on this policy that
-                    // the policy has been scheduled.
-                    for (const dependant of node.dependants) {
-                        dependant.dependsOn.delete(node);
-                    }
-                    policyMap.delete(node.policy.name);
-                    phase.policies.delete(node);
-                }
-            }
-        }
-        function walkPhases() {
-            for (const phase of orderedPhases) {
-                walkPhase(phase);
-                // if the phase isn't complete
-                if (phase.policies.size > 0 && phase !== noPhase) {
-                    if (!noPhase.hasRun) {
-                        // Try running noPhase to see if that unblocks this phase next tick.
-                        // This can happen if a phase that happens before noPhase
-                        // is waiting on a noPhase policy to complete.
-                        walkPhase(noPhase);
-                    }
-                    // Don't proceed to the next phase until this phase finishes.
-                    return;
-                }
-                if (phase.hasAfterPolicies) {
-                    // Run any policies unblocked by this phase
-                    walkPhase(noPhase);
-                }
-            }
-        }
-        // Iterate until we've put every node in the result list.
-        let iteration = 0;
-        while (policyMap.size > 0) {
-            iteration++;
-            const initialResultLength = result.length;
-            // Keep walking each phase in order until we can order every node.
-            walkPhases();
-            // The result list *should* get at least one larger each time
-            // after the first full pass.
-            // Otherwise, we're going to loop forever.
-            if (result.length <= initialResultLength && iteration > 1) {
-                throw new Error("Cannot satisfy policy dependencies due to requirements cycle.");
-            }
-        }
-        return result;
-    }
-}
-/**
- * Creates a totally empty pipeline.
- * Useful for testing or creating a custom one.
- */
-function createEmptyPipeline$1() {
-    return HttpPipeline.create();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const custom = inspect.custom;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const errorSanitizer = new Sanitizer();
-/**
- * A custom error type for failed pipeline requests.
- */
-let RestError$1 = class RestError extends Error {
-    /**
-     * Something went wrong when making the request.
-     * This means the actual request failed for some reason,
-     * such as a DNS issue or the connection being lost.
-     */
-    static REQUEST_SEND_ERROR = "REQUEST_SEND_ERROR";
-    /**
-     * This means that parsing the response from the server failed.
-     * It may have been malformed.
-     */
-    static PARSE_ERROR = "PARSE_ERROR";
-    /**
-     * The code of the error itself (use statics on RestError if possible.)
-     */
-    code;
-    /**
-     * The HTTP status code of the request (if applicable.)
-     */
-    statusCode;
-    /**
-     * The request that was made.
-     * This property is non-enumerable.
-     */
-    request;
-    /**
-     * The response received (if any.)
-     * This property is non-enumerable.
-     */
-    response;
-    /**
-     * Bonus property set by the throw site.
-     */
-    details;
-    constructor(message, options = {}) {
-        super(message);
-        this.name = "RestError";
-        this.code = options.code;
-        this.statusCode = options.statusCode;
-        // The request and response may contain sensitive information in the headers or body.
-        // To help prevent this sensitive information being accidentally logged, the request and response
-        // properties are marked as non-enumerable here. This prevents them showing up in the output of
-        // JSON.stringify and console.log.
-        Object.defineProperty(this, "request", { value: options.request, enumerable: false });
-        Object.defineProperty(this, "response", { value: options.response, enumerable: false });
-        // Only include useful agent information in the request for logging, as the full agent object
-        // may contain large binary data.
-        const agent = this.request?.agent
-            ? {
-                maxFreeSockets: this.request.agent.maxFreeSockets,
-                maxSockets: this.request.agent.maxSockets,
-            }
-            : undefined;
-        // Logging method for util.inspect in Node
-        Object.defineProperty(this, custom, {
-            value: () => {
-                // Extract non-enumerable properties and add them back. This is OK since in this output the request and
-                // response get sanitized.
-                return `RestError: ${this.message} \n ${errorSanitizer.sanitize({
-                    ...this,
-                    request: { ...this.request, agent },
-                    response: this.response,
-                })}`;
-            },
-            enumerable: false,
-        });
-        Object.setPrototypeOf(this, RestError.prototype);
-    }
-};
-/**
- * Typeguard for RestError
- * @param e - Something caught by a catch clause.
- */
-function isRestError$1(e) {
-    if (e instanceof RestError$1) {
-        return true;
-    }
-    return isError$1(e) && e.name === "RestError";
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const logger$3 = createClientLogger$1("ts-http-runtime");
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const DEFAULT_TLS_SETTINGS = {};
-function isReadableStream(body) {
-    return body && typeof body.pipe === "function";
-}
-function isStreamComplete(stream) {
-    if (stream.readable === false) {
-        return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-        const handler = () => {
-            resolve();
-            stream.removeListener("close", handler);
-            stream.removeListener("end", handler);
-            stream.removeListener("error", handler);
-        };
-        stream.on("close", handler);
-        stream.on("end", handler);
-        stream.on("error", handler);
-    });
-}
-function isArrayBuffer(body) {
-    return body && typeof body.byteLength === "number";
-}
-class ReportTransform extends Transform {
-    loadedBytes = 0;
-    progressCallback;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    _transform(chunk, _encoding, callback) {
-        this.push(chunk);
-        this.loadedBytes += chunk.length;
-        try {
-            this.progressCallback({ loadedBytes: this.loadedBytes });
-            callback();
-        }
-        catch (e) {
-            callback(e);
-        }
-    }
-    constructor(progressCallback) {
-        super();
-        this.progressCallback = progressCallback;
-    }
-}
-/**
- * A HttpClient implementation that uses Node's "https" module to send HTTPS requests.
- * @internal
- */
-class NodeHttpClient {
-    cachedHttpAgent;
-    cachedHttpsAgents = new WeakMap();
-    /**
-     * Makes a request over an underlying transport layer and returns the response.
-     * @param request - The request to be made.
-     */
-    async sendRequest(request) {
-        const abortController = new AbortController();
-        let abortListener;
-        if (request.abortSignal) {
-            if (request.abortSignal.aborted) {
-                throw new AbortError("The operation was aborted. Request has already been canceled.");
-            }
-            abortListener = (event) => {
-                if (event.type === "abort") {
-                    abortController.abort();
-                }
-            };
-            request.abortSignal.addEventListener("abort", abortListener);
-        }
-        let timeoutId;
-        if (request.timeout > 0) {
-            timeoutId = setTimeout(() => {
-                const sanitizer = new Sanitizer();
-                logger$3.info(`request to '${sanitizer.sanitizeUrl(request.url)}' timed out. canceling...`);
-                abortController.abort();
-            }, request.timeout);
-        }
-        const acceptEncoding = request.headers.get("Accept-Encoding");
-        const shouldDecompress = acceptEncoding?.includes("gzip") || acceptEncoding?.includes("deflate");
-        let body = typeof request.body === "function" ? request.body() : request.body;
-        if (body && !request.headers.has("Content-Length")) {
-            const bodyLength = getBodyLength(body);
-            if (bodyLength !== null) {
-                request.headers.set("Content-Length", bodyLength);
-            }
-        }
-        let responseStream;
-        try {
-            if (body && request.onUploadProgress) {
-                const onUploadProgress = request.onUploadProgress;
-                const uploadReportStream = new ReportTransform(onUploadProgress);
-                uploadReportStream.on("error", (e) => {
-                    logger$3.error("Error in upload progress", e);
-                });
-                if (isReadableStream(body)) {
-                    body.pipe(uploadReportStream);
-                }
-                else {
-                    uploadReportStream.end(body);
-                }
-                body = uploadReportStream;
-            }
-            const res = await this.makeRequest(request, abortController, body);
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
-            }
-            const headers = getResponseHeaders(res);
-            const status = res.statusCode ?? 0;
-            const response = {
-                status,
-                headers,
-                request,
-            };
-            // Responses to HEAD must not have a body.
-            // If they do return a body, that body must be ignored.
-            if (request.method === "HEAD") {
-                // call resume() and not destroy() to avoid closing the socket
-                // and losing keep alive
-                res.resume();
-                return response;
-            }
-            responseStream = shouldDecompress ? getDecodedResponseStream(res, headers) : res;
-            const onDownloadProgress = request.onDownloadProgress;
-            if (onDownloadProgress) {
-                const downloadReportStream = new ReportTransform(onDownloadProgress);
-                downloadReportStream.on("error", (e) => {
-                    logger$3.error("Error in download progress", e);
-                });
-                responseStream.pipe(downloadReportStream);
-                responseStream = downloadReportStream;
-            }
-            if (
-            // Value of POSITIVE_INFINITY in streamResponseStatusCodes is considered as any status code
-            request.streamResponseStatusCodes?.has(Number.POSITIVE_INFINITY) ||
-                request.streamResponseStatusCodes?.has(response.status)) {
-                response.readableStreamBody = responseStream;
-            }
-            else {
-                response.bodyAsText = await streamToText(responseStream);
-            }
-            return response;
-        }
-        finally {
-            // clean up event listener
-            if (request.abortSignal && abortListener) {
-                let uploadStreamDone = Promise.resolve();
-                if (isReadableStream(body)) {
-                    uploadStreamDone = isStreamComplete(body);
-                }
-                let downloadStreamDone = Promise.resolve();
-                if (isReadableStream(responseStream)) {
-                    downloadStreamDone = isStreamComplete(responseStream);
-                }
-                Promise.all([uploadStreamDone, downloadStreamDone])
-                    .then(() => {
-                    // eslint-disable-next-line promise/always-return
-                    if (abortListener) {
-                        request.abortSignal?.removeEventListener("abort", abortListener);
-                    }
-                })
-                    .catch((e) => {
-                    logger$3.warning("Error when cleaning up abortListener on httpRequest", e);
-                });
-            }
-        }
-    }
-    makeRequest(request, abortController, body) {
-        const url = new URL(request.url);
-        const isInsecure = url.protocol !== "https:";
-        if (isInsecure && !request.allowInsecureConnection) {
-            throw new Error(`Cannot connect to ${request.url} while allowInsecureConnection is false.`);
-        }
-        const agent = request.agent ?? this.getOrCreateAgent(request, isInsecure);
-        const options = {
-            agent,
-            hostname: url.hostname,
-            path: `${url.pathname}${url.search}`,
-            port: url.port,
-            method: request.method,
-            headers: request.headers.toJSON({ preserveCase: true }),
-            ...request.requestOverrides,
-        };
-        return new Promise((resolve, reject) => {
-            const req = isInsecure ? http$1.request(options, resolve) : https$1.request(options, resolve);
-            req.once("error", (err) => {
-                reject(new RestError$1(err.message, { code: err.code ?? RestError$1.REQUEST_SEND_ERROR, request }));
-            });
-            abortController.signal.addEventListener("abort", () => {
-                const abortError = new AbortError("The operation was aborted. Rejecting from abort signal callback while making request.");
-                req.destroy(abortError);
-                reject(abortError);
-            });
-            if (body && isReadableStream(body)) {
-                body.pipe(req);
-            }
-            else if (body) {
-                if (typeof body === "string" || Buffer.isBuffer(body)) {
-                    req.end(body);
-                }
-                else if (isArrayBuffer(body)) {
-                    req.end(ArrayBuffer.isView(body)
-                        ? Buffer.from(body.buffer, body.byteOffset, body.byteLength)
-                        : Buffer.from(body));
-                }
-                else {
-                    logger$3.error("Unrecognized body type", body);
-                    reject(new RestError$1("Unrecognized body type"));
-                }
-            }
-            else {
-                // streams don't like "undefined" being passed as data
-                req.end();
-            }
-        });
-    }
-    getOrCreateAgent(request, isInsecure) {
-        const disableKeepAlive = request.disableKeepAlive;
-        // Handle Insecure requests first
-        if (isInsecure) {
-            if (disableKeepAlive) {
-                // keepAlive:false is the default so we don't need a custom Agent
-                return http$1.globalAgent;
-            }
-            if (!this.cachedHttpAgent) {
-                // If there is no cached agent create a new one and cache it.
-                this.cachedHttpAgent = new http$1.Agent({ keepAlive: true });
-            }
-            return this.cachedHttpAgent;
-        }
-        else {
-            if (disableKeepAlive && !request.tlsSettings) {
-                // When there are no tlsSettings and keepAlive is false
-                // we don't need a custom agent
-                return https$1.globalAgent;
-            }
-            // We use the tlsSettings to index cached clients
-            const tlsSettings = request.tlsSettings ?? DEFAULT_TLS_SETTINGS;
-            // Get the cached agent or create a new one with the
-            // provided values for keepAlive and tlsSettings
-            let agent = this.cachedHttpsAgents.get(tlsSettings);
-            if (agent && agent.options.keepAlive === !disableKeepAlive) {
-                return agent;
-            }
-            logger$3.info("No cached TLS Agent exist, creating a new Agent");
-            agent = new https$1.Agent({
-                // keepAlive is true if disableKeepAlive is false.
-                keepAlive: !disableKeepAlive,
-                // Since we are spreading, if no tslSettings were provided, nothing is added to the agent options.
-                ...tlsSettings,
-            });
-            this.cachedHttpsAgents.set(tlsSettings, agent);
-            return agent;
-        }
-    }
-}
-function getResponseHeaders(res) {
-    const headers = createHttpHeaders$1();
-    for (const header of Object.keys(res.headers)) {
-        const value = res.headers[header];
-        if (Array.isArray(value)) {
-            if (value.length > 0) {
-                headers.set(header, value[0]);
-            }
-        }
-        else if (value) {
-            headers.set(header, value);
-        }
-    }
-    return headers;
-}
-function getDecodedResponseStream(stream, headers) {
-    const contentEncoding = headers.get("Content-Encoding");
-    if (contentEncoding === "gzip") {
-        const unzip = zlib.createGunzip();
-        stream.pipe(unzip);
-        return unzip;
-    }
-    else if (contentEncoding === "deflate") {
-        const inflate = zlib.createInflate();
-        stream.pipe(inflate);
-        return inflate;
-    }
-    return stream;
-}
-function streamToText(stream) {
-    return new Promise((resolve, reject) => {
-        const buffer = [];
-        stream.on("data", (chunk) => {
-            if (Buffer.isBuffer(chunk)) {
-                buffer.push(chunk);
-            }
-            else {
-                buffer.push(Buffer.from(chunk));
-            }
-        });
-        stream.on("end", () => {
-            resolve(Buffer.concat(buffer).toString("utf8"));
-        });
-        stream.on("error", (e) => {
-            if (e && e?.name === "AbortError") {
-                reject(e);
-            }
-            else {
-                reject(new RestError$1(`Error reading response as text: ${e.message}`, {
-                    code: RestError$1.PARSE_ERROR,
-                }));
-            }
-        });
-    });
-}
-/** @internal */
-function getBodyLength(body) {
-    if (!body) {
-        return 0;
-    }
-    else if (Buffer.isBuffer(body)) {
-        return body.length;
-    }
-    else if (isReadableStream(body)) {
-        return null;
-    }
-    else if (isArrayBuffer(body)) {
-        return body.byteLength;
-    }
-    else if (typeof body === "string") {
-        return Buffer.from(body).length;
-    }
-    else {
-        return null;
-    }
-}
-/**
- * Create a new HttpClient instance for the NodeJS environment.
- * @internal
- */
-function createNodeHttpClient() {
-    return new NodeHttpClient();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Create the correct HttpClient for the current environment.
- */
-function createDefaultHttpClient$1() {
-    return createNodeHttpClient();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the logPolicy.
- */
-const logPolicyName = "logPolicy";
-/**
- * A policy that logs all requests and responses.
- * @param options - Options to configure logPolicy.
- */
-function logPolicy$1(options = {}) {
-    const logger = options.logger ?? logger$3.info;
-    const sanitizer = new Sanitizer({
-        additionalAllowedHeaderNames: options.additionalAllowedHeaderNames,
-        additionalAllowedQueryParameters: options.additionalAllowedQueryParameters,
-    });
-    return {
-        name: logPolicyName,
-        async sendRequest(request, next) {
-            if (!logger.enabled) {
-                return next(request);
-            }
-            logger(`Request: ${sanitizer.sanitize(request)}`);
-            const response = await next(request);
-            logger(`Response status code: ${response.status}`);
-            logger(`Headers: ${sanitizer.sanitize({ headers: response.headers })}`);
-            return response;
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const DEFAULT_RETRY_POLICY_COUNT = 3;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const StandardAbortMessage = "The operation was aborted.";
-/**
- * A wrapper for setTimeout that resolves a promise after delayInMs milliseconds.
- * @param delayInMs - The number of milliseconds to be delayed.
- * @param value - The value to be resolved with after a timeout of t milliseconds.
- * @param options - The options for delay - currently abort options
- *                  - abortSignal - The abortSignal associated with containing operation.
- *                  - abortErrorMsg - The abort error message associated with containing operation.
- * @returns Resolved promise
- */
-function delay(delayInMs, value, options) {
-    return new Promise((resolve, reject) => {
-        let timer = undefined;
-        let onAborted = undefined;
-        const rejectOnAbort = () => {
-            return reject(new AbortError(options?.abortErrorMsg ? options?.abortErrorMsg : StandardAbortMessage));
-        };
-        const removeListeners = () => {
-            if (options?.abortSignal && onAborted) {
-                options.abortSignal.removeEventListener("abort", onAborted);
-            }
-        };
-        onAborted = () => {
-            if (timer) {
-                clearTimeout(timer);
-            }
-            removeListeners();
-            return rejectOnAbort();
-        };
-        if (options?.abortSignal && options.abortSignal.aborted) {
-            return rejectOnAbort();
-        }
-        timer = setTimeout(() => {
-            removeListeners();
-            resolve(value);
-        }, delayInMs);
-        if (options?.abortSignal) {
-            options.abortSignal.addEventListener("abort", onAborted);
-        }
-    });
-}
-/**
- * @internal
- * @returns the parsed value or undefined if the parsed value is invalid.
- */
-function parseHeaderValueAsNumber(response, headerName) {
-    const value = response.headers.get(headerName);
-    if (!value)
-        return;
-    const valueAsNum = Number(value);
-    if (Number.isNaN(valueAsNum))
-        return;
-    return valueAsNum;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The header that comes back from services representing
- * the amount of time (minimum) to wait to retry (in seconds or timestamp after which we can retry).
- */
-const RetryAfterHeader = "Retry-After";
-/**
- * The headers that come back from services representing
- * the amount of time (minimum) to wait to retry.
- *
- * "retry-after-ms", "x-ms-retry-after-ms" : milliseconds
- * "Retry-After" : seconds or timestamp
- */
-const AllRetryAfterHeaders = ["retry-after-ms", "x-ms-retry-after-ms", RetryAfterHeader];
-/**
- * A response is a throttling retry response if it has a throttling status code (429 or 503),
- * as long as one of the [ "Retry-After" or "retry-after-ms" or "x-ms-retry-after-ms" ] headers has a valid value.
- *
- * Returns the `retryAfterInMs` value if the response is a throttling retry response.
- * If not throttling retry response, returns `undefined`.
- *
- * @internal
- */
-function getRetryAfterInMs(response) {
-    if (!(response && [429, 503].includes(response.status)))
-        return undefined;
-    try {
-        // Headers: "retry-after-ms", "x-ms-retry-after-ms", "Retry-After"
-        for (const header of AllRetryAfterHeaders) {
-            const retryAfterValue = parseHeaderValueAsNumber(response, header);
-            if (retryAfterValue === 0 || retryAfterValue) {
-                // "Retry-After" header ==> seconds
-                // "retry-after-ms", "x-ms-retry-after-ms" headers ==> milli-seconds
-                const multiplyingFactor = header === RetryAfterHeader ? 1000 : 1;
-                return retryAfterValue * multiplyingFactor; // in milli-seconds
-            }
-        }
-        // RetryAfterHeader ("Retry-After") has a special case where it might be formatted as a date instead of a number of seconds
-        const retryAfterHeader = response.headers.get(RetryAfterHeader);
-        if (!retryAfterHeader)
-            return;
-        const date = Date.parse(retryAfterHeader);
-        const diff = date - Date.now();
-        // negative diff would mean a date in the past, so retry asap with 0 milliseconds
-        return Number.isFinite(diff) ? Math.max(0, diff) : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
-/**
- * A response is a retry response if it has a throttling status code (429 or 503),
- * as long as one of the [ "Retry-After" or "retry-after-ms" or "x-ms-retry-after-ms" ] headers has a valid value.
- */
-function isThrottlingRetryResponse(response) {
-    return Number.isFinite(getRetryAfterInMs(response));
-}
-function throttlingRetryStrategy() {
-    return {
-        name: "throttlingRetryStrategy",
-        retry({ response }) {
-            const retryAfterInMs = getRetryAfterInMs(response);
-            if (!Number.isFinite(retryAfterInMs)) {
-                return { skipStrategy: true };
-            }
-            return {
-                retryAfterInMs,
-            };
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-// intervals are in milliseconds
-const DEFAULT_CLIENT_RETRY_INTERVAL = 1000;
-const DEFAULT_CLIENT_MAX_RETRY_INTERVAL = 1000 * 64;
-/**
- * A retry strategy that retries with an exponentially increasing delay in these two cases:
- * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
- * - Or otherwise if the outgoing request fails (408, greater or equal than 500, except for 501 and 505).
- */
-function exponentialRetryStrategy(options = {}) {
-    const retryInterval = options.retryDelayInMs ?? DEFAULT_CLIENT_RETRY_INTERVAL;
-    const maxRetryInterval = options.maxRetryDelayInMs ?? DEFAULT_CLIENT_MAX_RETRY_INTERVAL;
-    return {
-        name: "exponentialRetryStrategy",
-        retry({ retryCount, response, responseError }) {
-            const matchedSystemError = isSystemError(responseError);
-            const ignoreSystemErrors = matchedSystemError && options.ignoreSystemErrors;
-            const isExponential = isExponentialRetryResponse(response);
-            const ignoreExponentialResponse = isExponential && options.ignoreHttpStatusCodes;
-            const unknownResponse = response && (isThrottlingRetryResponse(response) || !isExponential);
-            if (unknownResponse || ignoreExponentialResponse || ignoreSystemErrors) {
-                return { skipStrategy: true };
-            }
-            if (responseError && !matchedSystemError && !isExponential) {
-                return { errorToThrow: responseError };
-            }
-            return calculateRetryDelay(retryCount, {
-                retryDelayInMs: retryInterval,
-                maxRetryDelayInMs: maxRetryInterval,
-            });
-        },
-    };
-}
-/**
- * A response is a retry response if it has status codes:
- * - 408, or
- * - Greater or equal than 500, except for 501 and 505.
- */
-function isExponentialRetryResponse(response) {
-    return Boolean(response &&
-        response.status !== undefined &&
-        (response.status >= 500 || response.status === 408) &&
-        response.status !== 501 &&
-        response.status !== 505);
-}
-/**
- * Determines whether an error from a pipeline response was triggered in the network layer.
- */
-function isSystemError(err) {
-    if (!err) {
-        return false;
-    }
-    return (err.code === "ETIMEDOUT" ||
-        err.code === "ESOCKETTIMEDOUT" ||
-        err.code === "ECONNREFUSED" ||
-        err.code === "ECONNRESET" ||
-        err.code === "ENOENT" ||
-        err.code === "ENOTFOUND");
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const retryPolicyLogger = createClientLogger$1("ts-http-runtime retryPolicy");
-/**
- * The programmatic identifier of the retryPolicy.
- */
-const retryPolicyName = "retryPolicy";
-/**
- * retryPolicy is a generic policy to enable retrying requests when certain conditions are met
- */
-function retryPolicy(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_COUNT }) {
-    const logger = options.logger || retryPolicyLogger;
-    return {
-        name: retryPolicyName,
-        async sendRequest(request, next) {
-            let response;
-            let responseError;
-            let retryCount = -1;
-            retryRequest: while (true) {
-                retryCount += 1;
-                response = undefined;
-                responseError = undefined;
-                try {
-                    logger.info(`Retry ${retryCount}: Attempting to send request`, request.requestId);
-                    response = await next(request);
-                    logger.info(`Retry ${retryCount}: Received a response from request`, request.requestId);
-                }
-                catch (e) {
-                    logger.error(`Retry ${retryCount}: Received an error from request`, request.requestId);
-                    // RestErrors are valid targets for the retry strategies.
-                    // If none of the retry strategies can work with them, they will be thrown later in this policy.
-                    // If the received error is not a RestError, it is immediately thrown.
-                    if (!isRestError$1(e)) {
-                        throw e;
-                    }
-                    responseError = e;
-                    response = e.response;
-                }
-                if (request.abortSignal?.aborted) {
-                    logger.error(`Retry ${retryCount}: Request aborted.`);
-                    const abortError = new AbortError();
-                    throw abortError;
-                }
-                if (retryCount >= (options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT)) {
-                    logger.info(`Retry ${retryCount}: Maximum retries reached. Returning the last received response, or throwing the last received error.`);
-                    if (responseError) {
-                        throw responseError;
-                    }
-                    else if (response) {
-                        return response;
-                    }
-                    else {
-                        throw new Error("Maximum retries reached with no response or error to throw");
-                    }
-                }
-                logger.info(`Retry ${retryCount}: Processing ${strategies.length} retry strategies.`);
-                strategiesLoop: for (const strategy of strategies) {
-                    const strategyLogger = strategy.logger || logger;
-                    strategyLogger.info(`Retry ${retryCount}: Processing retry strategy ${strategy.name}.`);
-                    const modifiers = strategy.retry({
-                        retryCount,
-                        response,
-                        responseError,
-                    });
-                    if (modifiers.skipStrategy) {
-                        strategyLogger.info(`Retry ${retryCount}: Skipped.`);
-                        continue strategiesLoop;
-                    }
-                    const { errorToThrow, retryAfterInMs, redirectTo } = modifiers;
-                    if (errorToThrow) {
-                        strategyLogger.error(`Retry ${retryCount}: Retry strategy ${strategy.name} throws error:`, errorToThrow);
-                        throw errorToThrow;
-                    }
-                    if (retryAfterInMs || retryAfterInMs === 0) {
-                        strategyLogger.info(`Retry ${retryCount}: Retry strategy ${strategy.name} retries after ${retryAfterInMs}`);
-                        await delay(retryAfterInMs, undefined, { abortSignal: request.abortSignal });
-                        continue retryRequest;
-                    }
-                    if (redirectTo) {
-                        strategyLogger.info(`Retry ${retryCount}: Retry strategy ${strategy.name} redirects to ${redirectTo}`);
-                        request.url = redirectTo;
-                        continue retryRequest;
-                    }
-                }
-                if (responseError) {
-                    logger.info(`None of the retry strategies could work with the received error. Throwing it.`);
-                    throw responseError;
-                }
-                if (response) {
-                    logger.info(`None of the retry strategies could work with the received response. Returning it.`);
-                    return response;
-                }
-                // If all the retries skip and there's no response,
-                // we're still in the retry loop, so a new request will be sent
-                // until `maxRetries` is reached.
-            }
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Name of the {@link defaultRetryPolicy}
- */
-const defaultRetryPolicyName = "defaultRetryPolicy";
-/**
- * A policy that retries according to three strategies:
- * - When the server sends a 429 response with a Retry-After header.
- * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
- * - Or otherwise if the outgoing request fails, it will retry with an exponentially increasing delay.
- */
-function defaultRetryPolicy$1(options = {}) {
-    return {
-        name: defaultRetryPolicyName,
-        sendRequest: retryPolicy([throttlingRetryStrategy(), exponentialRetryStrategy(options)], {
-            maxRetries: options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT,
-        }).sendRequest,
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * If the request body is a native FormData, convert it to our FormDataMap
- * representation and clear the body. Node.js's HTTP stack doesn't handle
- * FormData natively, so the pipeline must serialize it later.
- *
- * @internal
- */
-function convertBodyToFormDataMap(body) {
-    if (typeof FormData !== "undefined" && body instanceof FormData) {
-        const formDataMap = {};
-        for (const [key, value] of body.entries()) {
-            const existing = formDataMap[key];
-            if (Array.isArray(existing)) {
-                existing.push(value);
-            }
-            else {
-                formDataMap[key] = existing !== undefined ? [existing, value] : [value];
-            }
-        }
-        return formDataMap;
-    }
-    return undefined;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the formDataPolicy.
- */
-const formDataPolicyName = "formDataPolicy";
-/**
- * A policy that encodes FormData on the request into the body.
- */
-function formDataPolicy$1() {
-    return {
-        name: formDataPolicyName,
-        async sendRequest(request, next) {
-            const converted = convertBodyToFormDataMap(request.body);
-            if (converted) {
-                request.formData = converted;
-                request.body = undefined;
-            }
-            if (request.formData) {
-                const contentType = request.headers.get("Content-Type");
-                if (contentType && contentType.indexOf("application/x-www-form-urlencoded") !== -1) {
-                    request.body = wwwFormUrlEncode(request.formData);
-                }
-                else {
-                    await prepareFormData(request.formData, request);
-                }
-                request.formData = undefined;
-            }
-            return next(request);
-        },
-    };
-}
-function wwwFormUrlEncode(formData) {
-    const urlSearchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(formData)) {
-        if (Array.isArray(value)) {
-            for (const subValue of value) {
-                urlSearchParams.append(key, subValue.toString());
-            }
-        }
-        else {
-            urlSearchParams.append(key, value.toString());
-        }
-    }
-    return urlSearchParams.toString();
-}
-async function prepareFormData(formData, request) {
-    // validate content type (multipart/form-data)
-    const contentType = request.headers.get("Content-Type");
-    if (contentType && !contentType.startsWith("multipart/form-data")) {
-        // content type is specified and is not multipart/form-data. Exit.
-        return;
-    }
-    request.headers.set("Content-Type", contentType ?? "multipart/form-data");
-    // set body to MultipartRequestBody using content from FormDataMap
-    const parts = [];
-    for (const [fieldName, values] of Object.entries(formData)) {
-        for (const value of Array.isArray(values) ? values : [values]) {
-            if (typeof value === "string") {
-                parts.push({
-                    headers: createHttpHeaders$1({
-                        "Content-Disposition": `form-data; name="${fieldName}"`,
-                    }),
-                    body: stringToUint8Array(value, "utf-8"),
-                });
-            }
-            else if (value === undefined || value === null || typeof value !== "object") {
-                throw new Error(`Unexpected value for key ${fieldName}: ${value}. Value should be serialized to string first.`);
-            }
-            else {
-                // using || instead of ?? here since if value.name is empty we should create a file name
-                const fileName = value.name || "blob";
-                const headers = createHttpHeaders$1();
-                headers.set("Content-Disposition", `form-data; name="${fieldName}"; filename="${fileName}"`);
-                // again, || is used since an empty value.type means the content type is unset
-                headers.set("Content-Type", value.type || "application/octet-stream");
-                parts.push({
-                    headers,
-                    body: value,
-                });
-            }
-        }
-    }
-    request.multipartBody = { parts };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Name of the Agent Policy
- */
-const agentPolicyName = "agentPolicy";
-/**
- * Gets a pipeline policy that sets http.agent
- */
-function agentPolicy$1(agent) {
-    return {
-        name: agentPolicyName,
-        sendRequest: async (req, next) => {
-            // Users may define an agent on the request, honor it over the client level one
-            if (!req.agent) {
-                req.agent = agent;
-            }
-            return next(req);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Name of the TLS Policy
- */
-const tlsPolicyName = "tlsPolicy";
-/**
- * Gets a pipeline policy that adds the client certificate to the HttpClient agent for authentication.
- */
-function tlsPolicy$1(tlsSettings) {
-    return {
-        name: tlsPolicyName,
-        sendRequest: async (req, next) => {
-            // Users may define a request tlsSettings, honor those over the client level one
-            if (!req.tlsSettings) {
-                req.tlsSettings = tlsSettings;
-            }
-            return next(req);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const HTTPS_PROXY = "HTTPS_PROXY";
-const HTTP_PROXY = "HTTP_PROXY";
-const ALL_PROXY = "ALL_PROXY";
-const NO_PROXY = "NO_PROXY";
-/**
- * The programmatic identifier of the proxyPolicy.
- */
-const proxyPolicyName = "proxyPolicy";
-/**
- * Stores the patterns specified in NO_PROXY environment variable.
- * @internal
- */
-const globalNoProxyList = [];
-let noProxyListLoaded = false;
-/** A cache of whether a host should bypass the proxy. */
-const globalBypassedMap = new Map();
-function getEnvironmentValue(name) {
-    if (process.env[name]) {
-        return process.env[name];
-    }
-    else if (process.env[name.toLowerCase()]) {
-        return process.env[name.toLowerCase()];
-    }
-    return undefined;
-}
-function loadEnvironmentProxyValue() {
-    if (!process) {
-        return undefined;
-    }
-    const httpsProxy = getEnvironmentValue(HTTPS_PROXY);
-    const allProxy = getEnvironmentValue(ALL_PROXY);
-    const httpProxy = getEnvironmentValue(HTTP_PROXY);
-    return httpsProxy || allProxy || httpProxy;
-}
-/**
- * Check whether the host of a given `uri` matches any pattern in the no proxy list.
- * If there's a match, any request sent to the same host shouldn't have the proxy settings set.
- * This implementation is a port of https://github.com/Azure/azure-sdk-for-net/blob/8cca811371159e527159c7eb65602477898683e2/sdk/core/Azure.Core/src/Pipeline/Internal/HttpEnvironmentProxy.cs#L210
- */
-function isBypassed(uri, noProxyList, bypassedMap) {
-    if (noProxyList.length === 0) {
-        return false;
-    }
-    const host = new URL(uri).hostname;
-    if (bypassedMap?.has(host)) {
-        return bypassedMap.get(host);
-    }
-    let isBypassedFlag = false;
-    for (const pattern of noProxyList) {
-        if (pattern[0] === ".") {
-            // This should match either domain it self or any subdomain or host
-            // .foo.com will match foo.com it self or *.foo.com
-            if (host.endsWith(pattern)) {
-                isBypassedFlag = true;
-            }
-            else {
-                if (host.length === pattern.length - 1 && host === pattern.slice(1)) {
-                    isBypassedFlag = true;
-                }
-            }
-        }
-        else {
-            if (host === pattern) {
-                isBypassedFlag = true;
-            }
-        }
-    }
-    bypassedMap?.set(host, isBypassedFlag);
-    return isBypassedFlag;
-}
-function loadNoProxy() {
-    const noProxy = getEnvironmentValue(NO_PROXY);
-    noProxyListLoaded = true;
-    if (noProxy) {
-        return noProxy
-            .split(",")
-            .map((item) => item.trim())
-            .filter((item) => item.length);
-    }
-    return [];
-}
-/**
- * This method attempts to parse a proxy URL from the environment
- * variables `HTTPS_PROXY` or `HTTP_PROXY`.
- */
-function getDefaultProxySettingsInternal() {
-    const envProxy = loadEnvironmentProxyValue();
-    return envProxy ? new URL(envProxy) : undefined;
-}
-function getUrlFromProxySettings(settings) {
-    let parsedProxyUrl;
-    try {
-        parsedProxyUrl = new URL(settings.host);
-    }
-    catch {
-        throw new Error(`Expecting a valid host string in proxy settings, but found "${settings.host}".`);
-    }
-    parsedProxyUrl.port = String(settings.port);
-    if (settings.username) {
-        parsedProxyUrl.username = settings.username;
-    }
-    if (settings.password) {
-        parsedProxyUrl.password = settings.password;
-    }
-    return parsedProxyUrl;
-}
-function setProxyAgentOnRequest(request, cachedAgents, proxyUrl) {
-    // Custom Agent should take precedence so if one is present
-    // we should skip to avoid overwriting it.
-    if (request.agent) {
-        return;
-    }
-    const url = new URL(request.url);
-    const isInsecure = url.protocol !== "https:";
-    if (request.tlsSettings) {
-        logger$3.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored.");
-    }
-    if (isInsecure) {
-        if (!cachedAgents.httpProxyAgent) {
-            cachedAgents.httpProxyAgent = new distExports.HttpProxyAgent(proxyUrl);
-        }
-        request.agent = cachedAgents.httpProxyAgent;
-    }
-    else {
-        if (!cachedAgents.httpsProxyAgent) {
-            cachedAgents.httpsProxyAgent = new distExports$1.HttpsProxyAgent(proxyUrl);
-        }
-        request.agent = cachedAgents.httpsProxyAgent;
-    }
-}
-/**
- * A policy that allows one to apply proxy settings to all requests.
- * If not passed static settings, they will be retrieved from the HTTPS_PROXY
- * or HTTP_PROXY environment variables.
- * @param proxySettings - ProxySettings to use on each request.
- * @param options - additional settings, for example, custom NO_PROXY patterns
- */
-function proxyPolicy$1(proxySettings, options) {
-    if (!noProxyListLoaded) {
-        globalNoProxyList.push(...loadNoProxy());
-    }
-    const defaultProxy = proxySettings
-        ? getUrlFromProxySettings(proxySettings)
-        : getDefaultProxySettingsInternal();
-    const cachedAgents = {};
-    return {
-        name: proxyPolicyName,
-        async sendRequest(request, next) {
-            if (!request.proxySettings &&
-                defaultProxy &&
-                !isBypassed(request.url, globalNoProxyList, globalBypassedMap)) {
-                setProxyAgentOnRequest(request, cachedAgents, defaultProxy);
-            }
-            else if (request.proxySettings) {
-                setProxyAgentOnRequest(request, cachedAgents, getUrlFromProxySettings(request.proxySettings));
-            }
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the decompressResponsePolicy.
- */
-const decompressResponsePolicyName = "decompressResponsePolicy";
-/**
- * A policy to enable response decompression according to Accept-Encoding header
- * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
- */
-function decompressResponsePolicy$1() {
-    return {
-        name: decompressResponsePolicyName,
-        async sendRequest(request, next) {
-            // HEAD requests have no body
-            if (request.method !== "HEAD") {
-                request.headers.set("Accept-Encoding", "gzip,deflate");
-            }
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the redirectPolicy.
- */
-const redirectPolicyName = "redirectPolicy";
-/**
- * Methods that are allowed to follow redirects 301 and 302
- */
-const allowedRedirect = ["GET", "HEAD"];
-/**
- * A policy to follow Location headers from the server in order
- * to support server-side redirection.
- * In the browser, this policy is not used.
- * @param options - Options to control policy behavior.
- */
-function redirectPolicy$1(options = {}) {
-    const { maxRetries = 20, allowCrossOriginRedirects = false } = options;
-    return {
-        name: redirectPolicyName,
-        async sendRequest(request, next) {
-            const response = await next(request);
-            return handleRedirect(next, response, maxRetries, allowCrossOriginRedirects);
-        },
-    };
-}
-async function handleRedirect(next, response, maxRetries, allowCrossOriginRedirects, currentRetries = 0) {
-    const { request, status, headers } = response;
-    const locationHeader = headers.get("location");
-    if (locationHeader &&
-        (status === 300 ||
-            (status === 301 && allowedRedirect.includes(request.method)) ||
-            (status === 302 && allowedRedirect.includes(request.method)) ||
-            (status === 303 && request.method === "POST") ||
-            status === 307) &&
-        currentRetries < maxRetries) {
-        const url = new URL(locationHeader, request.url);
-        // Only follow redirects to the same origin by default.
-        if (!allowCrossOriginRedirects) {
-            const originalUrl = new URL(request.url);
-            if (url.origin !== originalUrl.origin) {
-                logger$3.verbose(`Skipping cross-origin redirect from ${originalUrl.origin} to ${url.origin}.`);
-                return response;
-            }
-        }
-        request.url = url.toString();
-        // POST request with Status code 303 should be converted into a
-        // redirected GET request if the redirect url is present in the location header
-        if (status === 303) {
-            request.method = "GET";
-            request.headers.delete("Content-Length");
-            delete request.body;
-        }
-        request.headers.delete("Authorization");
-        const res = await next(request);
-        return handleRedirect(next, res, maxRetries, allowCrossOriginRedirects, currentRetries + 1);
-    }
-    return response;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function isBlob(x) {
-    return x instanceof Blob;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-async function* streamAsyncIterator() {
-    const reader = this.getReader();
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-                return;
-            }
-            yield value;
-        }
-    }
-    finally {
-        reader.releaseLock();
-    }
-}
-function makeAsyncIterable(webStream) {
-    if (!webStream[Symbol.asyncIterator]) {
-        webStream[Symbol.asyncIterator] = streamAsyncIterator.bind(webStream);
-    }
-    if (!webStream.values) {
-        webStream.values = streamAsyncIterator.bind(webStream);
-    }
-}
-function ensureNodeStream(stream) {
-    if (stream instanceof ReadableStream) {
-        makeAsyncIterable(stream);
-        return Readable.fromWeb(stream);
-    }
-    else {
-        return stream;
-    }
-}
-function toStream(source) {
-    if (source instanceof Uint8Array) {
-        return Readable.from(Buffer.from(source));
-    }
-    else if (isBlob(source)) {
-        return ensureNodeStream(source.stream());
-    }
-    else {
-        return ensureNodeStream(source);
-    }
-}
-/**
- * Utility function that concatenates a set of binary inputs into one combined output.
- *
- * @param sources - array of sources for the concatenation
- * @returns - in Node, a (() =\> NodeJS.ReadableStream) which, when read, produces a concatenation of all the inputs.
- *           In browser, returns a `Blob` representing all the concatenated inputs.
- *
- * @internal
- */
-async function concat(sources) {
-    return function () {
-        const streams = sources.map((x) => (typeof x === "function" ? x() : x)).map(toStream);
-        return Readable.from((async function* () {
-            for (const stream of streams) {
-                for await (const chunk of stream) {
-                    yield chunk;
-                }
-            }
-        })());
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function generateBoundary() {
-    return `----AzSDKFormBoundary${randomUUID()}`;
-}
-function encodeHeaders(headers) {
-    let result = "";
-    for (const [key, value] of headers) {
-        result += `${key}: ${value}\r\n`;
-    }
-    return result;
-}
-function getLength(source) {
-    if (source instanceof Uint8Array) {
-        return source.byteLength;
-    }
-    else if (isBlob(source)) {
-        // if was created using createFile then -1 means we have an unknown size
-        return source.size === -1 ? undefined : source.size;
-    }
-    else {
-        return undefined;
-    }
-}
-function getTotalLength(sources) {
-    let total = 0;
-    for (const source of sources) {
-        const partLength = getLength(source);
-        if (partLength === undefined) {
-            return undefined;
-        }
-        else {
-            total += partLength;
-        }
-    }
-    return total;
-}
-async function buildRequestBody(request, parts, boundary) {
-    const sources = [
-        stringToUint8Array(`--${boundary}`, "utf-8"),
-        ...parts.flatMap((part) => [
-            stringToUint8Array("\r\n", "utf-8"),
-            stringToUint8Array(encodeHeaders(part.headers), "utf-8"),
-            stringToUint8Array("\r\n", "utf-8"),
-            part.body,
-            stringToUint8Array(`\r\n--${boundary}`, "utf-8"),
-        ]),
-        stringToUint8Array("--\r\n\r\n", "utf-8"),
-    ];
-    const contentLength = getTotalLength(sources);
-    if (contentLength) {
-        request.headers.set("Content-Length", contentLength);
-    }
-    // The public BodyPart.body type uses Uint8Array (= Uint8Array<ArrayBufferLike>) for
-    // backward compatibility. Internally, concat requires Uint8Array<ArrayBuffer> to ensure
-    // SharedArrayBuffer-backed arrays don't flow into Blob construction. In practice, HTTP
-    // request bodies are always ArrayBuffer-backed, so this narrowing is safe.
-    request.body = await concat(sources);
-}
-/**
- * Name of multipart policy
- */
-const multipartPolicyName$1 = "multipartPolicy";
-const maxBoundaryLength = 70;
-const validBoundaryCharacters = new Set(`abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'()+,-./:=?`);
-function assertValidBoundary(boundary) {
-    if (boundary.length > maxBoundaryLength) {
-        throw new Error(`Multipart boundary "${boundary}" exceeds maximum length of 70 characters`);
-    }
-    if (Array.from(boundary).some((x) => !validBoundaryCharacters.has(x))) {
-        throw new Error(`Multipart boundary "${boundary}" contains invalid characters`);
-    }
-}
-/**
- * Pipeline policy for multipart requests
- */
-function multipartPolicy$1() {
-    return {
-        name: multipartPolicyName$1,
-        async sendRequest(request, next) {
-            if (!request.multipartBody) {
-                return next(request);
-            }
-            if (request.body) {
-                throw new Error("multipartBody and regular body cannot be set at the same time");
-            }
-            let boundary = request.multipartBody.boundary;
-            const contentTypeHeader = request.headers.get("Content-Type") ?? "multipart/mixed";
-            const parsedHeader = contentTypeHeader.match(/^(multipart\/[^ ;]+)(?:; *boundary=(.+))?$/);
-            if (!parsedHeader) {
-                throw new Error(`Got multipart request body, but content-type header was not multipart: ${contentTypeHeader}`);
-            }
-            const [, contentType, parsedBoundary] = parsedHeader;
-            if (parsedBoundary && boundary && parsedBoundary !== boundary) {
-                throw new Error(`Multipart boundary was specified as ${parsedBoundary} in the header, but got ${boundary} in the request body`);
-            }
-            boundary ??= parsedBoundary;
-            if (boundary) {
-                assertValidBoundary(boundary);
-            }
-            else {
-                boundary = generateBoundary();
-            }
-            request.headers.set("Content-Type", `${contentType}; boundary=${boundary}`);
-            await buildRequestBody(request, request.multipartBody.parts, boundary);
-            request.multipartBody = undefined;
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates a totally empty pipeline.
- * Useful for testing or creating a custom one.
- */
-function createEmptyPipeline() {
-    return createEmptyPipeline$1();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const logger$2 = createClientLogger("core-rest-pipeline");
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy that logs all requests and responses.
- * @param options - Options to configure logPolicy.
- */
-function logPolicy(options = {}) {
-    return logPolicy$1({
-        logger: logger$2.info,
-        ...options,
-    });
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy to follow Location headers from the server in order
- * to support server-side redirection.
- * In the browser, this policy is not used.
- * @param options - Options to control policy behavior.
- */
-function redirectPolicy(options = {}) {
-    return redirectPolicy$1(options);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * @internal
- */
-function getHeaderName() {
-    return "User-Agent";
-}
-/**
- * @internal
- */
-async function setPlatformSpecificData(map) {
-    if (process$1 && process$1.versions) {
-        const osInfo = `${os$1.type()} ${os$1.release()}; ${os$1.arch()}`;
-        if (process$1.versions.bun) {
-            map.set("Bun", `${process$1.versions.bun} (${osInfo})`);
-        }
-        else if (process$1.versions.deno) {
-            map.set("Deno", `${process$1.versions.deno} (${osInfo})`);
-        }
-        else if (process$1.versions.node) {
-            map.set("Node", `${process$1.versions.node} (${osInfo})`);
-        }
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const SDK_VERSION = "1.25.0";
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-function getUserAgentString(telemetryInfo) {
-    const parts = [];
-    for (const [key, value] of telemetryInfo) {
-        const token = value ? `${key}/${value}` : key;
-        parts.push(token);
-    }
-    return parts.join(" ");
-}
-/**
- * @internal
- */
-function getUserAgentHeaderName() {
-    return getHeaderName();
-}
-/**
- * @internal
- */
-async function getUserAgentValue(prefix) {
-    const runtimeInfo = new Map();
-    runtimeInfo.set("core-rest-pipeline", SDK_VERSION);
-    await setPlatformSpecificData(runtimeInfo);
-    const defaultAgent = getUserAgentString(runtimeInfo);
-    const userAgentValue = prefix ? `${prefix} ${defaultAgent}` : defaultAgent;
-    return userAgentValue;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const UserAgentHeaderName = getUserAgentHeaderName();
-/**
- * The programmatic identifier of the userAgentPolicy.
- */
-const userAgentPolicyName = "userAgentPolicy";
-/**
- * A policy that sets the User-Agent header (or equivalent) to reflect
- * the library version.
- * @param options - Options to customize the user agent value.
- */
-function userAgentPolicy(options = {}) {
-    const userAgentValue = getUserAgentValue(options.userAgentPrefix);
-    return {
-        name: userAgentPolicyName,
-        async sendRequest(request, next) {
-            if (!request.headers.has(UserAgentHeaderName)) {
-                request.headers.set(UserAgentHeaderName, await userAgentValue);
-            }
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Private symbol used as key on objects created using createFile containing the
- * original source of the file object.
- *
- * This is used in Node to access the original Node stream without using Blob#stream, which
- * returns a web stream. This is done to avoid a couple of bugs to do with Blob#stream and
- * Readable#to/fromWeb in Node versions we support:
- * - https://github.com/nodejs/node/issues/42694 (fixed in Node 18.14)
- * - https://github.com/nodejs/node/issues/48916 (fixed in Node 20.6)
- *
- * Once these versions are no longer supported, we may be able to stop doing this.
- *
- * @internal
- */
-const rawContent = Symbol("rawContent");
-/**
- * Type guard to check if a given object is a blob-like object with a raw content property.
- */
-function hasRawContent(x) {
-    return typeof x[rawContent] === "function";
-}
-/**
- * Extract the raw content from a given blob-like object. If the input was created using createFile
- * or createFileFromStream, the exact content passed into createFile/createFileFromStream will be used.
- * For true instances of Blob and File, returns the actual blob.
- *
- * @internal
- */
-function getRawContent(blob) {
-    if (hasRawContent(blob)) {
-        return blob[rawContent]();
-    }
-    else {
-        return blob;
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Name of multipart policy
- */
-const multipartPolicyName = multipartPolicyName$1;
-/**
- * Pipeline policy for multipart requests
- */
-function multipartPolicy() {
-    const tspPolicy = multipartPolicy$1();
-    return {
-        name: multipartPolicyName,
-        sendRequest: async (request, next) => {
-            if (request.multipartBody) {
-                for (const part of request.multipartBody.parts) {
-                    if (hasRawContent(part.body)) {
-                        part.body = getRawContent(part.body);
-                    }
-                }
-            }
-            return tspPolicy.sendRequest(request, next);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy to enable response decompression according to Accept-Encoding header
- * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
- */
-function decompressResponsePolicy() {
-    return decompressResponsePolicy$1();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy that retries according to three strategies:
- * - When the server sends a 429 response with a Retry-After header.
- * - When there are errors in the underlying transport layer (e.g. DNS lookup failures).
- * - Or otherwise if the outgoing request fails, it will retry with an exponentially increasing delay.
- */
-function defaultRetryPolicy(options = {}) {
-    return defaultRetryPolicy$1(options);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy that encodes FormData on the request into the body.
- */
-function formDataPolicy() {
-    return formDataPolicy$1();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A policy that allows one to apply proxy settings to all requests.
- * If not passed static settings, they will be retrieved from the HTTPS_PROXY
- * or HTTP_PROXY environment variables.
- * @param proxySettings - ProxySettings to use on each request.
- * @param options - additional settings, for example, custom NO_PROXY patterns
- */
-function proxyPolicy(proxySettings, options) {
-    return proxyPolicy$1(proxySettings);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the setClientRequestIdPolicy.
- */
-const setClientRequestIdPolicyName = "setClientRequestIdPolicy";
-/**
- * Each PipelineRequest gets a unique id upon creation.
- * This policy passes that unique id along via an HTTP header to enable better
- * telemetry and tracing.
- * @param requestIdHeaderName - The name of the header to pass the request ID to.
- */
-function setClientRequestIdPolicy(requestIdHeaderName = "x-ms-client-request-id") {
-    return {
-        name: setClientRequestIdPolicyName,
-        async sendRequest(request, next) {
-            if (!request.headers.has(requestIdHeaderName)) {
-                request.headers.set(requestIdHeaderName, request.requestId);
-            }
-            return next(request);
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Gets a pipeline policy that sets http.agent
- */
-function agentPolicy(agent) {
-    return agentPolicy$1(agent);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Gets a pipeline policy that adds the client certificate to the HttpClient agent for authentication.
- */
-function tlsPolicy(tlsSettings) {
-    return tlsPolicy$1(tlsSettings);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * A custom error type for failed pipeline requests.
- */
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-const RestError = RestError$1;
-/**
- * Typeguard for RestError
- * @param e - Something caught by a catch clause.
- */
-function isRestError(e) {
-    return isRestError$1(e);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the tracingPolicy.
- */
-const tracingPolicyName = "tracingPolicy";
-/**
- * A simple policy to create OpenTelemetry Spans for each request made by the pipeline
- * that has SpanOptions with a parent.
- * Requests made without a parent Span will not be recorded.
- * @param options - Options to configure the telemetry logged by the tracing policy.
- */
-function tracingPolicy(options = {}) {
-    const userAgentPromise = getUserAgentValue(options.userAgentPrefix);
-    const sanitizer = new Sanitizer({
-        additionalAllowedQueryParameters: options.additionalAllowedQueryParameters,
-    });
-    const tracingClient = tryCreateTracingClient();
-    return {
-        name: tracingPolicyName,
-        async sendRequest(request, next) {
-            if (!tracingClient) {
-                return next(request);
-            }
-            const userAgent = await userAgentPromise;
-            const spanAttributes = {
-                "http.url": sanitizer.sanitizeUrl(request.url),
-                "http.method": request.method,
-                "http.user_agent": userAgent,
-                requestId: request.requestId,
-            };
-            if (userAgent) {
-                spanAttributes["http.user_agent"] = userAgent;
-            }
-            const { span, tracingContext } = tryCreateSpan(tracingClient, request, spanAttributes) ?? {};
-            if (!span || !tracingContext) {
-                return next(request);
-            }
-            try {
-                const response = await tracingClient.withContext(tracingContext, next, request);
-                tryProcessResponse(span, response);
-                return response;
-            }
-            catch (err) {
-                tryProcessError(span, err);
-                throw err;
-            }
-        },
-    };
-}
-function tryCreateTracingClient() {
-    try {
-        return createTracingClient({
-            namespace: "",
-            packageName: "@azure/core-rest-pipeline",
-            packageVersion: SDK_VERSION,
-        });
-    }
-    catch (e) {
-        logger$2.warning(`Error when creating the TracingClient: ${getErrorMessage(e)}`);
-        return undefined;
-    }
-}
-function tryCreateSpan(tracingClient, request, spanAttributes) {
-    try {
-        // As per spec, we do not need to differentiate between HTTP and HTTPS in span name.
-        const { span, updatedOptions } = tracingClient.startSpan(`HTTP ${request.method}`, { tracingOptions: request.tracingOptions }, {
-            spanKind: "client",
-            spanAttributes,
-        });
-        // If the span is not recording, don't do any more work.
-        if (!span.isRecording()) {
-            span.end();
-            return undefined;
-        }
-        // set headers
-        const headers = tracingClient.createRequestHeaders(updatedOptions.tracingOptions.tracingContext);
-        for (const [key, value] of Object.entries(headers)) {
-            request.headers.set(key, value);
-        }
-        return { span, tracingContext: updatedOptions.tracingOptions.tracingContext };
-    }
-    catch (e) {
-        logger$2.warning(`Skipping creating a tracing span due to an error: ${getErrorMessage(e)}`);
-        return undefined;
-    }
-}
-function tryProcessError(span, error) {
-    try {
-        span.setStatus({
-            status: "error",
-            error: isError(error) ? error : undefined,
-        });
-        if (isRestError(error) && error.statusCode) {
-            span.setAttribute("http.status_code", error.statusCode);
-        }
-        span.end();
-    }
-    catch (e) {
-        logger$2.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
-    }
-}
-function tryProcessResponse(span, response) {
-    try {
-        span.setAttribute("http.status_code", response.status);
-        const serviceRequestId = response.headers.get("x-ms-request-id");
-        if (serviceRequestId) {
-            span.setAttribute("serviceRequestId", serviceRequestId);
-        }
-        // Per semantic conventions, only set the status to error if the status code is 4xx or 5xx.
-        // Otherwise, the status MUST remain unset.
-        // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
-        if (response.status >= 400) {
-            span.setStatus({
-                status: "error",
-            });
-        }
-        span.end();
-    }
-    catch (e) {
-        logger$2.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
-    }
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates a native AbortSignal which reflects the state of the provided AbortSignalLike.
- * If the AbortSignalLike is already a native AbortSignal, it is returned as is.
- * @param abortSignalLike - The AbortSignalLike to wrap.
- * @returns - An object containing the native AbortSignal and an optional cleanup function. The cleanup function should be called when the AbortSignal is no longer needed.
- */
-function wrapAbortSignalLike(abortSignalLike) {
-    if (abortSignalLike instanceof AbortSignal) {
-        return { abortSignal: abortSignalLike };
-    }
-    if (abortSignalLike.aborted) {
-        return {
-            abortSignal: AbortSignal.abort("reason" in abortSignalLike ? abortSignalLike.reason : undefined),
-        };
-    }
-    const controller = new AbortController();
-    let needsCleanup = true;
-    function cleanup() {
-        if (needsCleanup) {
-            abortSignalLike.removeEventListener("abort", listener);
-            needsCleanup = false;
-        }
-    }
-    function listener() {
-        controller.abort("reason" in abortSignalLike ? abortSignalLike.reason : undefined);
-        cleanup();
-    }
-    abortSignalLike.addEventListener("abort", listener);
-    return { abortSignal: controller.signal, cleanup };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const wrapAbortSignalLikePolicyName = "wrapAbortSignalLikePolicy";
-/**
- * Policy that ensure that any AbortSignalLike is wrapped in a native AbortSignal for processing by the pipeline.
- * Since the ts-http-runtime expects a native AbortSignal, this policy is used to ensure that any AbortSignalLike is wrapped in a native AbortSignal.
- *
- * @returns - created policy
- */
-function wrapAbortSignalLikePolicy() {
-    return {
-        name: wrapAbortSignalLikePolicyName,
-        sendRequest: async (request, next) => {
-            if (!request.abortSignal) {
-                return next(request);
-            }
-            const { abortSignal, cleanup } = wrapAbortSignalLike(request.abortSignal);
-            request.abortSignal = abortSignal;
-            try {
-                return await next(request);
-            }
-            finally {
-                cleanup?.();
-            }
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Create a new pipeline with a default set of customizable policies.
- * @param options - Options to configure a custom pipeline.
- */
-function createPipelineFromOptions(options) {
-    const pipeline = createEmptyPipeline();
-    {
-        if (options.agent) {
-            pipeline.addPolicy(agentPolicy(options.agent));
-        }
-        if (options.tlsOptions) {
-            pipeline.addPolicy(tlsPolicy(options.tlsOptions));
-        }
-        pipeline.addPolicy(proxyPolicy(options.proxyOptions));
-        pipeline.addPolicy(decompressResponsePolicy());
-    }
-    pipeline.addPolicy(wrapAbortSignalLikePolicy());
-    pipeline.addPolicy(formDataPolicy(), { beforePolicies: [multipartPolicyName] });
-    pipeline.addPolicy(userAgentPolicy(options.userAgentOptions));
-    pipeline.addPolicy(setClientRequestIdPolicy(options.telemetryOptions?.clientRequestIdHeaderName));
-    // The multipart policy is added after policies with no phase, so that
-    // policies can be added between it and formDataPolicy to modify
-    // properties (e.g., making the boundary constant in recorded tests).
-    pipeline.addPolicy(multipartPolicy(), { afterPhase: "Deserialize" });
-    pipeline.addPolicy(defaultRetryPolicy(options.retryOptions), { phase: "Retry" });
-    pipeline.addPolicy(tracingPolicy({ ...options.userAgentOptions, ...options.loggingOptions }), {
-        afterPhase: "Retry",
-    });
-    {
-        // Both XHR and Fetch expect to handle redirects automatically,
-        // so only include this policy when we're in Node.
-        pipeline.addPolicy(redirectPolicy(options.redirectOptions), { afterPhase: "Retry" });
-    }
-    pipeline.addPolicy(logPolicy(options.loggingOptions), { afterPhase: "Sign" });
-    return pipeline;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Create the correct HttpClient for the current environment.
- */
-function createDefaultHttpClient() {
-    const client = createDefaultHttpClient$1();
-    return {
-        async sendRequest(request) {
-            // we wrap any AbortSignalLike here since the TypeSpec runtime expects a native AbortSignal.
-            // 99% of the time, this should be a no-op since a native AbortSignal is passed in.
-            const { abortSignal, cleanup } = request.abortSignal
-                ? wrapAbortSignalLike(request.abortSignal)
-                : {};
-            try {
-                request.abortSignal = abortSignal;
-                return await client.sendRequest(request);
-            }
-            finally {
-                cleanup?.();
-            }
-        },
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates an object that satisfies the `HttpHeaders` interface.
- * @param rawHeaders - A simple object representing initial headers
- */
-function createHttpHeaders(rawHeaders) {
-    return createHttpHeaders$1(rawHeaders);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates a new pipeline request with the given options.
- * This method is to allow for the easy setting of default values and not required.
- * @param options - The options to create the request with.
- */
-function createPipelineRequest(options) {
-    // Cast required due to difference between ts-http-runtime requiring AbortSignal while core-rest-pipeline allows
-    // the more generic AbortSignalLike. The wrapAbortSignalLike pipeline policy will take care of ensuring that any AbortSignalLike in the request
-    // is converted into a true AbortSignal.
-    return createPipelineRequest$1(options);
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-// Default options for the cycler if none are provided
-const DEFAULT_CYCLER_OPTIONS = {
-    forcedRefreshWindowInMs: 1000, // Force waiting for a refresh 1s before the token expires
-    retryIntervalInMs: 3000, // Allow refresh attempts every 3s
-    refreshWindowInMs: 1000 * 60 * 2, // Start refreshing 2m before expiry
-};
-/**
- * Converts an an unreliable access token getter (which may resolve with null)
- * into an AccessTokenGetter by retrying the unreliable getter in a regular
- * interval.
- *
- * @param getAccessToken - A function that produces a promise of an access token that may fail by returning null.
- * @param retryIntervalInMs - The time (in milliseconds) to wait between retry attempts.
- * @param refreshTimeout - The timestamp after which the refresh attempt will fail, throwing an exception.
- * @returns - A promise that, if it resolves, will resolve with an access token.
- */
-async function beginRefresh(getAccessToken, retryIntervalInMs, refreshTimeout) {
-    // This wrapper handles exceptions gracefully as long as we haven't exceeded
-    // the timeout.
-    async function tryGetAccessToken() {
-        if (Date.now() < refreshTimeout) {
-            try {
-                return await getAccessToken();
-            }
-            catch {
-                return null;
-            }
-        }
-        else {
-            const finalToken = await getAccessToken();
-            // Timeout is up, so throw if it's still null
-            if (finalToken === null) {
-                throw new Error("Failed to refresh access token.");
-            }
-            return finalToken;
-        }
-    }
-    let token = await tryGetAccessToken();
-    while (token === null) {
-        await delay$1(retryIntervalInMs);
-        token = await tryGetAccessToken();
-    }
-    return token;
-}
-/**
- * Creates a token cycler from a credential, scopes, and optional settings.
- *
- * A token cycler represents a way to reliably retrieve a valid access token
- * from a TokenCredential. It will handle initializing the token, refreshing it
- * when it nears expiration, and synchronizes refresh attempts to avoid
- * concurrency hazards.
- *
- * @param credential - the underlying TokenCredential that provides the access
- * token
- * @param tokenCyclerOptions - optionally override default settings for the cycler
- *
- * @returns - a function that reliably produces a valid access token
- */
-function createTokenCycler(credential, tokenCyclerOptions) {
-    let refreshWorker = null;
-    let token = null;
-    let tenantId;
-    const options = {
-        ...DEFAULT_CYCLER_OPTIONS,
-        ...tokenCyclerOptions,
-    };
-    /**
-     * This little holder defines several predicates that we use to construct
-     * the rules of refreshing the token.
-     */
-    const cycler = {
-        /**
-         * Produces true if a refresh job is currently in progress.
-         */
-        get isRefreshing() {
-            return refreshWorker !== null;
-        },
-        /**
-         * Produces true if the cycler SHOULD refresh (we are within the refresh
-         * window and not already refreshing)
-         */
-        get shouldRefresh() {
-            if (token === null) {
-                return true;
-            }
-            if (cycler.isRefreshing) {
-                return false;
-            }
-            if (token.refreshAfterTimestamp && token.refreshAfterTimestamp < Date.now()) {
-                return true;
-            }
-            return token.expiresOnTimestamp - options.refreshWindowInMs < Date.now();
-        },
-        /**
-         * Produces true if the cycler MUST refresh (null or nearly-expired
-         * token).
-         */
-        get mustRefresh() {
-            return (token === null || token.expiresOnTimestamp - options.forcedRefreshWindowInMs < Date.now());
-        },
-    };
-    /**
-     * Starts a refresh job or returns the existing job if one is already
-     * running.
-     */
-    function refresh(scopes, getTokenOptions) {
-        if (!cycler.isRefreshing) {
-            // We bind `scopes` here to avoid passing it around a lot
-            const tryGetAccessToken = () => credential.getToken(scopes, getTokenOptions);
-            // Take advantage of promise chaining to insert an assignment to `token`
-            // before the refresh can be considered done.
-            refreshWorker = beginRefresh(tryGetAccessToken, options.retryIntervalInMs, 
-            // If we don't have a token, then we should timeout immediately
-            token?.expiresOnTimestamp ?? Date.now())
-                .then((_token) => {
-                refreshWorker = null;
-                token = _token;
-                tenantId = getTokenOptions.tenantId;
-                return token;
-            })
-                .catch((reason) => {
-                // We also should reset the refresher if we enter a failed state.  All
-                // existing awaiters will throw, but subsequent requests will start a
-                // new retry chain.
-                refreshWorker = null;
-                token = null;
-                tenantId = undefined;
-                throw reason;
-            });
-        }
-        return refreshWorker;
-    }
-    return async (scopes, tokenOptions) => {
-        //
-        // Simple rules:
-        // - If we MUST refresh, then return the refresh task, blocking
-        //   the pipeline until a token is available.
-        // - If we SHOULD refresh, then run refresh but don't return it
-        //   (we can still use the cached token).
-        // - Return the token, since it's fine if we didn't return in
-        //   step 1.
-        //
-        const hasClaimChallenge = Boolean(tokenOptions.claims);
-        const tenantIdChanged = tenantId !== tokenOptions.tenantId;
-        if (hasClaimChallenge) {
-            // If we've received a claim, we know the existing token isn't valid
-            // We want to clear it so that that refresh worker won't use the old expiration time as a timeout
-            token = null;
-        }
-        // If the tenantId passed in token options is different to the one we have
-        // Or if we are in claim challenge and the token was rejected and a new access token need to be issued, we need to
-        // refresh the token with the new tenantId or token.
-        const mustRefresh = tenantIdChanged || hasClaimChallenge || cycler.mustRefresh;
-        if (mustRefresh) {
-            return refresh(scopes, tokenOptions);
-        }
-        if (cycler.shouldRefresh) {
-            refresh(scopes, tokenOptions);
-        }
-        return token;
-    };
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the bearerTokenAuthenticationPolicy.
- */
-const bearerTokenAuthenticationPolicyName = "bearerTokenAuthenticationPolicy";
-/**
- * Try to send the given request.
- *
- * When a response is received, returns a tuple of the response received and, if the response was received
- * inside a thrown RestError, the RestError that was thrown.
- *
- * Otherwise, if an error was thrown while sending the request that did not provide an underlying response, it
- * will be rethrown.
- */
-async function trySendRequest(request, next) {
-    try {
-        return [await next(request), undefined];
-    }
-    catch (e) {
-        if (isRestError(e) && e.response) {
-            return [e.response, e];
-        }
-        else {
-            throw e;
-        }
-    }
-}
-/**
- * Default authorize request handler
- */
-async function defaultAuthorizeRequest(options) {
-    const { scopes, getAccessToken, request } = options;
-    // Enable CAE true by default
-    const getTokenOptions = {
-        abortSignal: request.abortSignal,
-        tracingOptions: request.tracingOptions,
-        enableCae: true,
-    };
-    const accessToken = await getAccessToken(scopes, getTokenOptions);
-    if (accessToken) {
-        options.request.headers.set("Authorization", `Bearer ${accessToken.token}`);
-    }
-}
-/**
- * We will retrieve the challenge only if the response status code was 401,
- * and if the response contained the header "WWW-Authenticate" with a non-empty value.
- */
-function isChallengeResponse(response) {
-    return response.status === 401 && response.headers.has("WWW-Authenticate");
-}
-/**
- * Re-authorize the request for CAE challenge.
- * The response containing the challenge is `options.response`.
- * If this method returns true, the underlying request will be sent once again.
- */
-async function authorizeRequestOnCaeChallenge(onChallengeOptions, caeClaims) {
-    const { scopes } = onChallengeOptions;
-    const accessToken = await onChallengeOptions.getAccessToken(scopes, {
-        enableCae: true,
-        claims: caeClaims,
-    });
-    if (!accessToken) {
-        return false;
-    }
-    onChallengeOptions.request.headers.set("Authorization", `${accessToken.tokenType ?? "Bearer"} ${accessToken.token}`);
-    return true;
-}
-/**
- * A policy that can request a token from a TokenCredential implementation and
- * then apply it to the Authorization header of a request as a Bearer token.
- */
-function bearerTokenAuthenticationPolicy(options) {
-    const { credential, scopes, challengeCallbacks } = options;
-    const logger = options.logger || logger$2;
-    const callbacks = {
-        authorizeRequest: challengeCallbacks?.authorizeRequest?.bind(challengeCallbacks) ?? defaultAuthorizeRequest,
-        authorizeRequestOnChallenge: challengeCallbacks?.authorizeRequestOnChallenge?.bind(challengeCallbacks),
-    };
-    // This function encapsulates the entire process of reliably retrieving the token
-    // The options are left out of the public API until there's demand to configure this.
-    // Remember to extend `BearerTokenAuthenticationPolicyOptions` with `TokenCyclerOptions`
-    // in order to pass through the `options` object.
-    const getAccessToken = credential
-        ? createTokenCycler(credential /* , options */)
-        : () => Promise.resolve(null);
-    return {
-        name: bearerTokenAuthenticationPolicyName,
-        /**
-         * If there's no challenge parameter:
-         * - It will try to retrieve the token using the cache, or the credential's getToken.
-         * - Then it will try the next policy with or without the retrieved token.
-         *
-         * It uses the challenge parameters to:
-         * - Skip a first attempt to get the token from the credential if there's no cached token,
-         *   since it expects the token to be retrievable only after the challenge.
-         * - Prepare the outgoing request if the `prepareRequest` method has been provided.
-         * - Send an initial request to receive the challenge if it fails.
-         * - Process a challenge if the response contains it.
-         * - Retrieve a token with the challenge information, then re-send the request.
-         */
-        async sendRequest(request, next) {
-            if (!request.url.toLowerCase().startsWith("https://")) {
-                throw new Error("Bearer token authentication is not permitted for non-TLS protected (non-https) URLs.");
-            }
-            await callbacks.authorizeRequest({
-                scopes: Array.isArray(scopes) ? scopes : [scopes],
-                request,
-                getAccessToken,
-                logger,
-            });
-            let response;
-            let error;
-            let shouldSendRequest;
-            [response, error] = await trySendRequest(request, next);
-            if (isChallengeResponse(response)) {
-                let claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate"));
-                // Handle CAE by default when receive CAE claim
-                if (claims) {
-                    let parsedClaim;
-                    // Return the response immediately if claims is not a valid base64 encoded string
-                    try {
-                        parsedClaim = atob(claims);
-                    }
-                    catch (e) {
-                        logger.warning(`The WWW-Authenticate header contains "claims" that cannot be parsed. Unable to perform the Continuous Access Evaluation authentication flow. Unparsable claims: ${claims}`);
-                        return response;
-                    }
-                    shouldSendRequest = await authorizeRequestOnCaeChallenge({
-                        scopes: Array.isArray(scopes) ? scopes : [scopes],
-                        response,
-                        request,
-                        getAccessToken,
-                        logger,
-                    }, parsedClaim);
-                    // Send updated request and handle response for RestError
-                    if (shouldSendRequest) {
-                        [response, error] = await trySendRequest(request, next);
-                    }
-                }
-                else if (callbacks.authorizeRequestOnChallenge) {
-                    // Handle custom challenges when client provides custom callback
-                    shouldSendRequest = await callbacks.authorizeRequestOnChallenge({
-                        scopes: Array.isArray(scopes) ? scopes : [scopes],
-                        request,
-                        response,
-                        getAccessToken,
-                        logger,
-                    });
-                    // Send updated request and handle response for RestError
-                    if (shouldSendRequest) {
-                        [response, error] = await trySendRequest(request, next);
-                    }
-                    // If we get another CAE Claim, we will handle it by default and return whatever value we receive for this
-                    if (isChallengeResponse(response)) {
-                        claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate") ?? "");
-                        if (claims) {
-                            let parsedClaim;
-                            try {
-                                parsedClaim = atob(claims);
-                            }
-                            catch (e) {
-                                logger.warning(`The WWW-Authenticate header contains "claims" that cannot be parsed. Unable to perform the Continuous Access Evaluation authentication flow. Unparsable claims: ${claims}`);
-                                return response;
-                            }
-                            shouldSendRequest = await authorizeRequestOnCaeChallenge({
-                                scopes: Array.isArray(scopes) ? scopes : [scopes],
-                                response,
-                                request,
-                                getAccessToken,
-                                logger,
-                            }, parsedClaim);
-                            // Send updated request and handle response for RestError
-                            if (shouldSendRequest) {
-                                [response, error] = await trySendRequest(request, next);
-                            }
-                        }
-                    }
-                }
-            }
-            if (error) {
-                throw error;
-            }
-            else {
-                return response;
-            }
-        },
-    };
-}
-/**
- * Converts: `Bearer a="b", c="d", Pop e="f", g="h"`.
- * Into: `[ { scheme: 'Bearer', params: { a: 'b', c: 'd' } }, { scheme: 'Pop', params: { e: 'f', g: 'h' } } ]`.
- *
- * @internal
- */
-function parseChallenges(challenges) {
-    // Challenge regex seperates the string to individual challenges with different schemes in the format `Scheme a="b", c=d`
-    // The challenge regex captures parameteres with either quotes values or unquoted values
-    const challengeRegex = /(\w+)\s+((?:\w+=(?:"[^"]*"|[^,]*),?\s*)+)/g;
-    // Parameter regex captures the claims group removed from the scheme in the format `a="b"` and `c="d"`
-    // CAE challenge always have quoted parameters. For more reference, https://learn.microsoft.com/entra/identity-platform/claims-challenge
-    const paramRegex = /(\w+)="([^"]*)"/g;
-    const parsedChallenges = [];
-    let match;
-    // Iterate over each challenge match
-    while ((match = challengeRegex.exec(challenges)) !== null) {
-        const scheme = match[1];
-        const paramsString = match[2];
-        const params = {};
-        let paramMatch;
-        // Iterate over each parameter match
-        while ((paramMatch = paramRegex.exec(paramsString)) !== null) {
-            params[paramMatch[1]] = paramMatch[2];
-        }
-        parsedChallenges.push({ scheme, params });
-    }
-    return parsedChallenges;
-}
-/**
- * Parse a pipeline response and look for a CAE challenge with "Bearer" scheme
- * Return the value in the header without parsing the challenge
- * @internal
- */
-function getCaeChallengeClaims(challenges) {
-    if (!challenges) {
-        return;
-    }
-    // Find all challenges present in the header
-    const parsedChallenges = parseChallenges(challenges);
-    return parsedChallenges.find((x) => x.scheme === "Bearer" && x.params.claims && x.params.error === "insufficient_claims")?.params.claims;
-}
-
-var stateCjs = {};
-
-var hasRequiredStateCjs;
-
-function requireStateCjs () {
-	if (hasRequiredStateCjs) return stateCjs;
-	hasRequiredStateCjs = 1;
-	// Copyright (c) Microsoft Corporation.
-	// Licensed under the MIT License.
-	Object.defineProperty(stateCjs, "__esModule", { value: true });
-	stateCjs.state = void 0;
-	/**
-	 * Holds the singleton operationRequestMap, to be shared across CJS and ESM imports.
-	 */
-	stateCjs.state = {
-	    operationRequestMap: new WeakMap(),
-	};
-	
-	return stateCjs;
-}
-
-var stateCjsExports = requireStateCjs();
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-// @ts-expect-error The recommended approach to sharing module state between ESM and CJS.
-// See https://github.com/isaacs/tshy/blob/main/README.md#module-local-state for additional information.
-/**
- * Defines the shared state between CJS and ESM by re-exporting the CJS state.
- */
-const state = stateCjsExports.state;
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * @internal
- * Retrieves the value to use for a given operation argument
- * @param operationArguments - The arguments passed from the generated client
- * @param parameter - The parameter description
- * @param fallbackObject - If something isn't found in the arguments bag, look here.
- *  Generally used to look at the service client properties.
- */
-function getOperationArgumentValueFromParameter(operationArguments, parameter, fallbackObject) {
-    let parameterPath = parameter.parameterPath;
-    const parameterMapper = parameter.mapper;
-    let value;
-    if (typeof parameterPath === "string") {
-        parameterPath = [parameterPath];
-    }
-    if (Array.isArray(parameterPath)) {
-        if (parameterPath.length > 0) {
-            if (parameterMapper.isConstant) {
-                value = parameterMapper.defaultValue;
-            }
-            else {
-                let propertySearchResult = getPropertyFromParameterPath(operationArguments, parameterPath);
-                if (!propertySearchResult.propertyFound && fallbackObject) {
-                    propertySearchResult = getPropertyFromParameterPath(fallbackObject, parameterPath);
-                }
-                let useDefaultValue = false;
-                if (!propertySearchResult.propertyFound) {
-                    useDefaultValue =
-                        parameterMapper.required ||
-                            (parameterPath[0] === "options" && parameterPath.length === 2);
-                }
-                value = useDefaultValue ? parameterMapper.defaultValue : propertySearchResult.propertyValue;
-            }
-        }
-    }
-    else {
-        if (parameterMapper.required) {
-            value = {};
-        }
-        for (const [propertyName, propertyPath] of Object.entries(parameterPath)) {
-            const propertyMapper = parameterMapper.type.modelProperties[propertyName];
-            const propertyValue = getOperationArgumentValueFromParameter(operationArguments, {
-                parameterPath: propertyPath,
-                mapper: propertyMapper,
-            }, fallbackObject);
-            if (propertyValue !== undefined) {
-                if (!value) {
-                    value = {};
-                }
-                Object.defineProperty(value, propertyName, {
-                    value: propertyValue,
-                    enumerable: true,
-                    configurable: true,
-                    writable: true,
-                });
-            }
-        }
-    }
-    return value;
-}
-function getPropertyFromParameterPath(parent, parameterPath) {
-    const result = { propertyFound: false };
-    let i = 0;
-    for (; i < parameterPath.length; ++i) {
-        const parameterPathPart = parameterPath[i];
-        // Make sure to check inherited properties too, so don't use hasOwnProperty().
-        if (parent && parameterPathPart in parent) {
-            parent = parent[parameterPathPart];
-        }
-        else {
-            break;
-        }
-    }
-    if (i === parameterPath.length) {
-        result.propertyValue = parent;
-        result.propertyFound = true;
-    }
-    return result;
-}
-const originalRequestSymbol = Symbol.for("@azure/core-client original request");
-function hasOriginalRequest(request) {
-    return originalRequestSymbol in request;
-}
-function getOperationRequestInfo(request) {
-    if (hasOriginalRequest(request)) {
-        return getOperationRequestInfo(request[originalRequestSymbol]);
-    }
-    let info = state.operationRequestMap.get(request);
-    if (!info) {
-        info = {};
-        state.operationRequestMap.set(request, info);
-    }
-    return info;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const defaultJsonContentTypes = ["application/json", "text/json"];
-const defaultXmlContentTypes = ["application/xml", "application/atom+xml"];
-/**
- * The programmatic identifier of the deserializationPolicy.
- */
-const deserializationPolicyName = "deserializationPolicy";
-/**
- * This policy handles parsing out responses according to OperationSpecs on the request.
- */
-function deserializationPolicy(options = {}) {
-    const jsonContentTypes = options.expectedContentTypes?.json ?? defaultJsonContentTypes;
-    const xmlContentTypes = options.expectedContentTypes?.xml ?? defaultXmlContentTypes;
-    const parseXML = options.parseXML;
-    const serializerOptions = options.serializerOptions;
-    const updatedOptions = {
-        xml: {
-            rootName: serializerOptions?.xml.rootName ?? "",
-            includeRoot: serializerOptions?.xml.includeRoot ?? false,
-            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY,
-        },
-    };
-    return {
-        name: deserializationPolicyName,
-        async sendRequest(request, next) {
-            const response = await next(request);
-            return deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, updatedOptions, parseXML);
-        },
-    };
-}
-function getOperationResponseMap(parsedResponse) {
-    let result;
-    const request = parsedResponse.request;
-    const operationInfo = getOperationRequestInfo(request);
-    const operationSpec = operationInfo?.operationSpec;
-    if (operationSpec) {
-        if (!operationInfo?.operationResponseGetter) {
-            result = operationSpec.responses[parsedResponse.status];
-        }
-        else {
-            result = operationInfo?.operationResponseGetter(operationSpec, parsedResponse);
-        }
-    }
-    return result;
-}
-function shouldDeserializeResponse(parsedResponse) {
-    const request = parsedResponse.request;
-    const operationInfo = getOperationRequestInfo(request);
-    const shouldDeserialize = operationInfo?.shouldDeserialize;
-    let result;
-    if (shouldDeserialize === undefined) {
-        result = true;
-    }
-    else if (typeof shouldDeserialize === "boolean") {
-        result = shouldDeserialize;
-    }
-    else {
-        result = shouldDeserialize(parsedResponse);
-    }
-    return result;
-}
-async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-    const parsedResponse = await parse(jsonContentTypes, xmlContentTypes, response, options, parseXML);
-    if (!shouldDeserializeResponse(parsedResponse)) {
-        return parsedResponse;
-    }
-    const operationInfo = getOperationRequestInfo(parsedResponse.request);
-    const operationSpec = operationInfo?.operationSpec;
-    if (!operationSpec || !operationSpec.responses) {
-        return parsedResponse;
-    }
-    const responseSpec = getOperationResponseMap(parsedResponse);
-    const { error, shouldReturnResponse } = handleErrorResponse(parsedResponse, operationSpec, responseSpec, options);
-    if (error) {
-        throw error;
-    }
-    else if (shouldReturnResponse) {
-        return parsedResponse;
-    }
-    // An operation response spec does exist for current status code, so
-    // use it to deserialize the response.
-    if (responseSpec) {
-        if (responseSpec.bodyMapper) {
-            let valueToDeserialize = parsedResponse.parsedBody;
-            if (operationSpec.isXML && responseSpec.bodyMapper.type.name === MapperTypeNames.Sequence) {
-                valueToDeserialize =
-                    typeof valueToDeserialize === "object"
-                        ? valueToDeserialize[responseSpec.bodyMapper.xmlElementName]
-                        : [];
-            }
-            try {
-                parsedResponse.parsedBody = operationSpec.serializer.deserialize(responseSpec.bodyMapper, valueToDeserialize, "operationRes.parsedBody", options);
-            }
-            catch (deserializeError) {
-                const restError = new RestError(`Error ${deserializeError} occurred in deserializing the responseBody - ${parsedResponse.bodyAsText}`, {
-                    statusCode: parsedResponse.status,
-                    request: parsedResponse.request,
-                    response: parsedResponse,
-                });
-                throw restError;
-            }
-        }
-        else if (operationSpec.httpMethod === "HEAD") {
-            // head methods never have a body, but we return a boolean to indicate presence/absence of the resource
-            parsedResponse.parsedBody = response.status >= 200 && response.status < 300;
-        }
-        if (responseSpec.headersMapper) {
-            parsedResponse.parsedHeaders = operationSpec.serializer.deserialize(responseSpec.headersMapper, parsedResponse.headers.toJSON(), "operationRes.parsedHeaders", { xml: {}, ignoreUnknownProperties: true });
-        }
-    }
-    return parsedResponse;
-}
-function isOperationSpecEmpty(operationSpec) {
-    const expectedStatusCodes = Object.keys(operationSpec.responses);
-    return (expectedStatusCodes.length === 0 ||
-        (expectedStatusCodes.length === 1 && expectedStatusCodes[0] === "default"));
-}
-function handleErrorResponse(parsedResponse, operationSpec, responseSpec, options) {
-    const isSuccessByStatus = 200 <= parsedResponse.status && parsedResponse.status < 300;
-    const isExpectedStatusCode = isOperationSpecEmpty(operationSpec)
-        ? isSuccessByStatus
-        : !!responseSpec;
-    if (isExpectedStatusCode) {
-        if (responseSpec) {
-            if (!responseSpec.isError) {
-                return { error: null, shouldReturnResponse: false };
-            }
-        }
-        else {
-            return { error: null, shouldReturnResponse: false };
-        }
-    }
-    const errorResponseSpec = responseSpec ?? operationSpec.responses.default;
-    const initialErrorMessage = parsedResponse.request.streamResponseStatusCodes?.has(parsedResponse.status)
-        ? `Unexpected status code: ${parsedResponse.status}`
-        : parsedResponse.bodyAsText;
-    const error = new RestError(initialErrorMessage, {
-        statusCode: parsedResponse.status,
-        request: parsedResponse.request,
-        response: parsedResponse,
-    });
-    // If the item failed but there's no error spec or default spec to deserialize the error,
-    // and the parsed body doesn't look like an error object,
-    // we should fail so we just throw the parsed response
-    if (!errorResponseSpec &&
-        !(parsedResponse.parsedBody?.error?.code && parsedResponse.parsedBody?.error?.message)) {
-        throw error;
-    }
-    const defaultBodyMapper = errorResponseSpec?.bodyMapper;
-    const defaultHeadersMapper = errorResponseSpec?.headersMapper;
-    try {
-        // If error response has a body, try to deserialize it using default body mapper.
-        // Then try to extract error code & message from it
-        if (parsedResponse.parsedBody) {
-            const parsedBody = parsedResponse.parsedBody;
-            let deserializedError;
-            if (defaultBodyMapper) {
-                let valueToDeserialize = parsedBody;
-                if (operationSpec.isXML && defaultBodyMapper.type.name === MapperTypeNames.Sequence) {
-                    valueToDeserialize = [];
-                    const elementName = defaultBodyMapper.xmlElementName;
-                    if (typeof parsedBody === "object" && elementName) {
-                        valueToDeserialize = parsedBody[elementName];
-                    }
-                }
-                deserializedError = operationSpec.serializer.deserialize(defaultBodyMapper, valueToDeserialize, "error.response.parsedBody", options);
-            }
-            const internalError = parsedBody.error || deserializedError || parsedBody;
-            error.code = internalError.code;
-            if (internalError.message) {
-                error.message = internalError.message;
-            }
-            if (defaultBodyMapper) {
-                error.response.parsedBody = deserializedError;
-            }
-        }
-        // If error response has headers, try to deserialize it using default header mapper
-        if (parsedResponse.headers && defaultHeadersMapper) {
-            error.response.parsedHeaders =
-                operationSpec.serializer.deserialize(defaultHeadersMapper, parsedResponse.headers.toJSON(), "operationRes.parsedHeaders");
-        }
-    }
-    catch (defaultError) {
-        error.message = `Error "${defaultError.message}" occurred in deserializing the responseBody - "${parsedResponse.bodyAsText}" for the default response.`;
-    }
-    return { error, shouldReturnResponse: false };
-}
-async function parse(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
-    if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) &&
-        operationResponse.bodyAsText) {
-        const text = operationResponse.bodyAsText;
-        const contentType = operationResponse.headers.get("Content-Type") || "";
-        const contentComponents = !contentType
-            ? []
-            : contentType.split(";").map((component) => component.toLowerCase());
-        try {
-            if (contentComponents.length === 0 ||
-                contentComponents.some((component) => jsonContentTypes.indexOf(component) !== -1)) {
-                operationResponse.parsedBody = JSON.parse(text);
-                return operationResponse;
-            }
-            else if (contentComponents.some((component) => xmlContentTypes.indexOf(component) !== -1)) {
-                if (!parseXML) {
-                    throw new Error("Parsing XML not supported.");
-                }
-                const body = await parseXML(text, opts.xml);
-                operationResponse.parsedBody = body;
-                return operationResponse;
-            }
-        }
-        catch (err) {
-            const msg = `Error "${err}" occurred while parsing the response body - ${operationResponse.bodyAsText}.`;
-            const errCode = err.code || RestError.PARSE_ERROR;
-            const e = new RestError(msg, {
-                code: errCode,
-                statusCode: operationResponse.status,
-                request: operationResponse.request,
-                response: operationResponse,
-            });
-            throw e;
-        }
-    }
-    return operationResponse;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Gets the list of status codes for streaming responses.
- * @internal
- */
-function getStreamingResponseStatusCodes(operationSpec) {
-    const result = new Set();
-    for (const [statusCode, operationResponse] of Object.entries(operationSpec.responses)) {
-        if (operationResponse.bodyMapper &&
-            operationResponse.bodyMapper.type.name === MapperTypeNames.Stream) {
-            result.add(Number(statusCode));
-        }
-    }
-    return result;
-}
-/**
- * Get the path to this parameter's value as a dotted string (a.b.c).
- * @param parameter - The parameter to get the path string for.
- * @returns The path to this parameter's value as a dotted string.
- * @internal
- */
-function getPathStringFromParameter(parameter) {
-    const { parameterPath, mapper } = parameter;
-    let result;
-    if (typeof parameterPath === "string") {
-        result = parameterPath;
-    }
-    else if (Array.isArray(parameterPath)) {
-        result = parameterPath.join(".");
-    }
-    else {
-        result = mapper.serializedName;
-    }
-    return result;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * The programmatic identifier of the serializationPolicy.
- */
-const serializationPolicyName = "serializationPolicy";
-/**
- * This policy handles assembling the request body and headers using
- * an OperationSpec and OperationArguments on the request.
- */
-function serializationPolicy(options = {}) {
-    const stringifyXML = options.stringifyXML;
-    return {
-        name: serializationPolicyName,
-        sendRequest(request, next) {
-            const operationInfo = getOperationRequestInfo(request);
-            const operationSpec = operationInfo?.operationSpec;
-            const operationArguments = operationInfo?.operationArguments;
-            if (operationSpec && operationArguments) {
-                serializeHeaders(request, operationArguments, operationSpec);
-                serializeRequestBody(request, operationArguments, operationSpec, stringifyXML);
-            }
-            return next(request);
-        },
-    };
-}
-/**
- * @internal
- */
-function serializeHeaders(request, operationArguments, operationSpec) {
-    if (operationSpec.headerParameters) {
-        for (const headerParameter of operationSpec.headerParameters) {
-            let headerValue = getOperationArgumentValueFromParameter(operationArguments, headerParameter);
-            if ((headerValue !== null && headerValue !== undefined) || headerParameter.mapper.required) {
-                headerValue = operationSpec.serializer.serialize(headerParameter.mapper, headerValue, getPathStringFromParameter(headerParameter));
-                const headerCollectionPrefix = headerParameter.mapper
-                    .headerCollectionPrefix;
-                if (headerCollectionPrefix) {
-                    for (const key of Object.keys(headerValue)) {
-                        request.headers.set(headerCollectionPrefix + key, headerValue[key]);
-                    }
-                }
-                else {
-                    request.headers.set(headerParameter.mapper.serializedName || getPathStringFromParameter(headerParameter), headerValue);
-                }
-            }
-        }
-    }
-    const customHeaders = operationArguments.options?.requestOptions?.customHeaders;
-    if (customHeaders) {
-        for (const customHeaderName of Object.keys(customHeaders)) {
-            request.headers.set(customHeaderName, customHeaders[customHeaderName]);
-        }
-    }
-}
-/**
- * @internal
- */
-function serializeRequestBody(request, operationArguments, operationSpec, stringifyXML = function () {
-    throw new Error("XML serialization unsupported!");
-}) {
-    const serializerOptions = operationArguments.options?.serializerOptions;
-    const updatedOptions = {
-        xml: {
-            rootName: serializerOptions?.xml.rootName ?? "",
-            includeRoot: serializerOptions?.xml.includeRoot ?? false,
-            xmlCharKey: serializerOptions?.xml.xmlCharKey ?? XML_CHARKEY,
-        },
-    };
-    const xmlCharKey = updatedOptions.xml.xmlCharKey;
-    if (operationSpec.requestBody && operationSpec.requestBody.mapper) {
-        request.body = getOperationArgumentValueFromParameter(operationArguments, operationSpec.requestBody);
-        const bodyMapper = operationSpec.requestBody.mapper;
-        const { required, serializedName, xmlName, xmlElementName, xmlNamespace, xmlNamespacePrefix, nullable, } = bodyMapper;
-        const typeName = bodyMapper.type.name;
-        try {
-            if ((request.body !== undefined && request.body !== null) ||
-                (nullable && request.body === null) ||
-                required) {
-                const requestBodyParameterPathString = getPathStringFromParameter(operationSpec.requestBody);
-                request.body = operationSpec.serializer.serialize(bodyMapper, request.body, requestBodyParameterPathString, updatedOptions);
-                const isStream = typeName === MapperTypeNames.Stream;
-                if (operationSpec.isXML) {
-                    const xmlnsKey = xmlNamespacePrefix ? `xmlns:${xmlNamespacePrefix}` : "xmlns";
-                    const value = getXmlValueWithNamespace(xmlNamespace, xmlnsKey, typeName, request.body, updatedOptions);
-                    if (typeName === MapperTypeNames.Sequence) {
-                        request.body = stringifyXML(prepareXMLRootList(value, xmlElementName || xmlName || serializedName, xmlnsKey, xmlNamespace), { rootName: xmlName || serializedName, xmlCharKey });
-                    }
-                    else if (!isStream) {
-                        request.body = stringifyXML(value, {
-                            rootName: xmlName || serializedName,
-                            xmlCharKey,
-                        });
-                    }
-                }
-                else if (typeName === MapperTypeNames.String &&
-                    (operationSpec.contentType?.match("text/plain") || operationSpec.mediaType === "text")) {
-                    // the String serializer has validated that request body is a string
-                    // so just send the string.
-                    return;
-                }
-                else if (!isStream) {
-                    request.body = JSON.stringify(request.body);
-                }
-            }
-        }
-        catch (error) {
-            throw new Error(`Error "${error.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, undefined, "  ")}.`);
-        }
-    }
-    else if (operationSpec.formDataParameters && operationSpec.formDataParameters.length > 0) {
-        request.formData = {};
-        for (const formDataParameter of operationSpec.formDataParameters) {
-            const formDataParameterValue = getOperationArgumentValueFromParameter(operationArguments, formDataParameter);
-            if (formDataParameterValue !== undefined && formDataParameterValue !== null) {
-                const formDataParameterPropertyName = formDataParameter.mapper.serializedName || getPathStringFromParameter(formDataParameter);
-                request.formData[formDataParameterPropertyName] = operationSpec.serializer.serialize(formDataParameter.mapper, formDataParameterValue, getPathStringFromParameter(formDataParameter), updatedOptions);
-            }
-        }
-    }
-}
-/**
- * Adds an xml namespace to the xml serialized object if needed, otherwise it just returns the value itself
- */
-function getXmlValueWithNamespace(xmlNamespace, xmlnsKey, typeName, serializedValue, options) {
-    // Composite and Sequence schemas already got their root namespace set during serialization
-    // We just need to add xmlns to the other schema types
-    if (xmlNamespace && !["Composite", "Sequence", "Dictionary"].includes(typeName)) {
-        const result = {};
-        result[options.xml.xmlCharKey] = serializedValue;
-        result[XML_ATTRKEY] = { [xmlnsKey]: xmlNamespace };
-        return result;
-    }
-    return serializedValue;
-}
-function prepareXMLRootList(obj, elementName, xmlNamespaceKey, xmlNamespace) {
-    if (!Array.isArray(obj)) {
-        obj = [obj];
-    }
-    if (!xmlNamespaceKey || !xmlNamespace) {
-        return { [elementName]: obj };
-    }
-    const result = { [elementName]: obj };
-    result[XML_ATTRKEY] = { [xmlNamespaceKey]: xmlNamespace };
-    return result;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Creates a new Pipeline for use with a Service Client.
- * Adds in deserializationPolicy by default.
- * Also adds in bearerTokenAuthenticationPolicy if passed a TokenCredential.
- * @param options - Options to customize the created pipeline.
- */
-function createClientPipeline(options = {}) {
-    const pipeline = createPipelineFromOptions(options ?? {});
-    if (options.credentialOptions) {
-        pipeline.addPolicy(bearerTokenAuthenticationPolicy({
-            credential: options.credentialOptions.credential,
-            scopes: options.credentialOptions.credentialScopes,
-        }));
-    }
-    pipeline.addPolicy(serializationPolicy(options.serializationOptions), { phase: "Serialize" });
-    pipeline.addPolicy(deserializationPolicy(options.deserializationOptions), {
-        phase: "Deserialize",
-    });
-    return pipeline;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-let cachedHttpClient;
-function getCachedDefaultHttpClient() {
-    if (!cachedHttpClient) {
-        cachedHttpClient = createDefaultHttpClient();
-    }
-    return cachedHttpClient;
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const CollectionFormatToDelimiterMap = {
-    CSV: ",",
-    SSV: " ",
-    Multi: "Multi",
-    TSV: "\t",
-    Pipes: "|",
-};
-function getRequestUrl(baseUri, operationSpec, operationArguments, fallbackObject) {
-    const urlReplacements = calculateUrlReplacements(operationSpec, operationArguments, fallbackObject);
-    let isAbsolutePath = false;
-    let requestUrl = replaceAll(baseUri, urlReplacements);
-    if (operationSpec.path) {
-        let path = replaceAll(operationSpec.path, urlReplacements);
-        // QUIRK: sometimes we get a path component like /{nextLink}
-        // which may be a fully formed URL with a leading /. In that case, we should
-        // remove the leading /
-        if (operationSpec.path === "/{nextLink}" && path.startsWith("/")) {
-            path = path.substring(1);
-        }
-        // QUIRK: sometimes we get a path component like {nextLink}
-        // which may be a fully formed URL. In that case, we should
-        // ignore the baseUri.
-        if (isAbsoluteUrl(path)) {
-            requestUrl = path;
-            isAbsolutePath = true;
-        }
-        else {
-            requestUrl = appendPath(requestUrl, path);
-        }
-    }
-    const { queryParams, sequenceParams } = calculateQueryParameters(operationSpec, operationArguments, fallbackObject);
-    /**
-     * Notice that this call sets the `noOverwrite` parameter to true if the `requestUrl`
-     * is an absolute path. This ensures that existing query parameter values in `requestUrl`
-     * do not get overwritten. On the other hand when `requestUrl` is not absolute path, it
-     * is still being built so there is nothing to overwrite.
-     */
-    requestUrl = appendQueryParams(requestUrl, queryParams, sequenceParams, isAbsolutePath);
-    return requestUrl;
-}
-function replaceAll(input, replacements) {
-    let result = input;
-    for (const [searchValue, replaceValue] of replacements) {
-        result = result.split(searchValue).join(replaceValue);
-    }
-    return result;
-}
-function calculateUrlReplacements(operationSpec, operationArguments, fallbackObject) {
-    const result = new Map();
-    if (operationSpec.urlParameters?.length) {
-        for (const urlParameter of operationSpec.urlParameters) {
-            let urlParameterValue = getOperationArgumentValueFromParameter(operationArguments, urlParameter, fallbackObject);
-            const parameterPathString = getPathStringFromParameter(urlParameter);
-            urlParameterValue = operationSpec.serializer.serialize(urlParameter.mapper, urlParameterValue, parameterPathString);
-            if (!urlParameter.skipEncoding) {
-                urlParameterValue = encodeURIComponent(urlParameterValue);
-            }
-            result.set(`{${urlParameter.mapper.serializedName || parameterPathString}}`, urlParameterValue);
-        }
-    }
-    return result;
-}
-function isAbsoluteUrl(url) {
-    return url.includes("://");
-}
-function appendPath(url, pathToAppend) {
-    if (!pathToAppend) {
-        return url;
-    }
-    const parsedUrl = new URL(url);
-    let newPath = parsedUrl.pathname;
-    if (!newPath.endsWith("/")) {
-        newPath = `${newPath}/`;
-    }
-    if (pathToAppend.startsWith("/")) {
-        pathToAppend = pathToAppend.substring(1);
-    }
-    const searchStart = pathToAppend.indexOf("?");
-    if (searchStart !== -1) {
-        const path = pathToAppend.substring(0, searchStart);
-        const search = pathToAppend.substring(searchStart + 1);
-        newPath = newPath + path;
-        if (search) {
-            parsedUrl.search = parsedUrl.search ? `${parsedUrl.search}&${search}` : search;
-        }
-    }
-    else {
-        newPath = newPath + pathToAppend;
-    }
-    // Use Object.assign to bypass react-native's incorrect readonly URL.pathname declaration
-    Object.assign(parsedUrl, { pathname: newPath });
-    return parsedUrl.toString();
-}
-function calculateQueryParameters(operationSpec, operationArguments, fallbackObject) {
-    const result = new Map();
-    const sequenceParams = new Set();
-    if (operationSpec.queryParameters?.length) {
-        for (const queryParameter of operationSpec.queryParameters) {
-            if (queryParameter.mapper.type.name === "Sequence" && queryParameter.mapper.serializedName) {
-                sequenceParams.add(queryParameter.mapper.serializedName);
-            }
-            let queryParameterValue = getOperationArgumentValueFromParameter(operationArguments, queryParameter, fallbackObject);
-            if ((queryParameterValue !== undefined && queryParameterValue !== null) ||
-                queryParameter.mapper.required) {
-                queryParameterValue = operationSpec.serializer.serialize(queryParameter.mapper, queryParameterValue, getPathStringFromParameter(queryParameter));
-                const delimiter = queryParameter.collectionFormat
-                    ? CollectionFormatToDelimiterMap[queryParameter.collectionFormat]
-                    : "";
-                if (Array.isArray(queryParameterValue)) {
-                    // replace null and undefined
-                    queryParameterValue = queryParameterValue.map((item) => {
-                        if (item === null || item === undefined) {
-                            return "";
-                        }
-                        return item;
-                    });
-                }
-                if (queryParameter.collectionFormat === "Multi" && queryParameterValue.length === 0) {
-                    continue;
-                }
-                else if (Array.isArray(queryParameterValue) &&
-                    (queryParameter.collectionFormat === "SSV" || queryParameter.collectionFormat === "TSV")) {
-                    queryParameterValue = queryParameterValue.join(delimiter);
-                }
-                if (!queryParameter.skipEncoding) {
-                    if (Array.isArray(queryParameterValue)) {
-                        queryParameterValue = queryParameterValue.map((item) => {
-                            return encodeURIComponent(item);
-                        });
-                    }
-                    else {
-                        queryParameterValue = encodeURIComponent(queryParameterValue);
-                    }
-                }
-                // Join pipes and CSV *after* encoding, or the server will be upset.
-                if (Array.isArray(queryParameterValue) &&
-                    (queryParameter.collectionFormat === "CSV" || queryParameter.collectionFormat === "Pipes")) {
-                    queryParameterValue = queryParameterValue.join(delimiter);
-                }
-                result.set(queryParameter.mapper.serializedName || getPathStringFromParameter(queryParameter), queryParameterValue);
-            }
-        }
-    }
-    return {
-        queryParams: result,
-        sequenceParams,
-    };
-}
-function simpleParseQueryParams(queryString) {
-    const result = new Map();
-    if (!queryString || queryString[0] !== "?") {
-        return result;
-    }
-    // remove the leading ?
-    queryString = queryString.slice(1);
-    const pairs = queryString.split("&");
-    for (const pair of pairs) {
-        const [name, value] = pair.split("=", 2);
-        const existingValue = result.get(name);
-        if (existingValue) {
-            if (Array.isArray(existingValue)) {
-                existingValue.push(value);
-            }
-            else {
-                result.set(name, [existingValue, value]);
-            }
-        }
-        else {
-            result.set(name, value);
-        }
-    }
-    return result;
-}
-/** @internal */
-function appendQueryParams(url, queryParams, sequenceParams, noOverwrite = false) {
-    if (queryParams.size === 0) {
-        return url;
-    }
-    const parsedUrl = new URL(url);
-    // QUIRK: parsedUrl.searchParams will have their name/value pairs decoded, which
-    // can change their meaning to the server, such as in the case of a SAS signature.
-    // To avoid accidentally un-encoding a query param, we parse the key/values ourselves
-    const combinedParams = simpleParseQueryParams(parsedUrl.search);
-    for (const [name, value] of queryParams) {
-        const existingValue = combinedParams.get(name);
-        if (Array.isArray(existingValue)) {
-            if (Array.isArray(value)) {
-                existingValue.push(...value);
-                const valueSet = new Set(existingValue);
-                combinedParams.set(name, Array.from(valueSet));
-            }
-            else {
-                existingValue.push(value);
-            }
-        }
-        else if (existingValue) {
-            if (Array.isArray(value)) {
-                value.unshift(existingValue);
-            }
-            else if (sequenceParams.has(name)) {
-                combinedParams.set(name, [existingValue, value]);
-            }
-            if (!noOverwrite) {
-                combinedParams.set(name, value);
-            }
-        }
-        else {
-            combinedParams.set(name, value);
-        }
-    }
-    const searchPieces = [];
-    for (const [name, value] of combinedParams) {
-        if (typeof value === "string") {
-            searchPieces.push(`${name}=${value}`);
-        }
-        else if (Array.isArray(value)) {
-            // QUIRK: If we get an array of values, include multiple key/value pairs
-            for (const subValue of value) {
-                searchPieces.push(`${name}=${subValue}`);
-            }
-        }
-        else {
-            searchPieces.push(`${name}=${value}`);
-        }
-    }
-    // QUIRK: we have to set search manually as searchParams will encode comma when it shouldn't.
-    parsedUrl.search = searchPieces.length ? `?${searchPieces.join("&")}` : "";
-    return parsedUrl.toString();
-}
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-const logger$1 = createClientLogger("core-client");
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-/**
- * Initializes a new instance of the ServiceClient.
- */
-class ServiceClient {
-    /**
-     * If specified, this is the base URI that requests will be made against for this ServiceClient.
-     * If it is not specified, then all OperationSpecs must contain a baseUrl property.
-     */
-    _endpoint;
-    /**
-     * The default request content type for the service.
-     * Used if no requestContentType is present on an OperationSpec.
-     */
-    _requestContentType;
-    /**
-     * Set to true if the request is sent over HTTP instead of HTTPS
-     */
-    _allowInsecureConnection;
-    /**
-     * The HTTP client that will be used to send requests.
-     */
-    _httpClient;
-    /**
-     * The pipeline used by this client to make requests
-     */
-    pipeline;
-    /**
-     * The ServiceClient constructor
-     * @param options - The service client options that govern the behavior of the client.
-     */
-    constructor(options = {}) {
-        this._requestContentType = options.requestContentType;
-        this._endpoint = options.endpoint ?? options.baseUri;
-        if (options.baseUri) {
-            logger$1.warning("The baseUri option for SDK Clients has been deprecated, please use endpoint instead.");
-        }
-        this._allowInsecureConnection = options.allowInsecureConnection;
-        this._httpClient = options.httpClient || getCachedDefaultHttpClient();
-        this.pipeline = options.pipeline || createDefaultPipeline(options);
-        if (options.additionalPolicies?.length) {
-            for (const { policy, position } of options.additionalPolicies) {
-                // Sign happens after Retry and is commonly needed to occur
-                // before policies that intercept post-retry.
-                const afterPhase = position === "perRetry" ? "Sign" : undefined;
-                this.pipeline.addPolicy(policy, {
-                    afterPhase,
-                });
-            }
-        }
-    }
-    /**
-     * Send the provided httpRequest.
-     */
-    sendRequest(request) {
-        return this.pipeline.sendRequest(this._httpClient, request);
-    }
-    /**
-     * Send an HTTP request that is populated using the provided OperationSpec.
-     * @typeParam T - The typed result of the request, based on the OperationSpec.
-     * @param operationArguments - The arguments that the HTTP request's templated values will be populated from.
-     * @param operationSpec - The OperationSpec to use to populate the httpRequest.
-     */
-    async sendOperationRequest(operationArguments, operationSpec) {
-        const endpoint = operationSpec.baseUrl || this._endpoint;
-        if (!endpoint) {
-            throw new Error("If operationSpec.baseUrl is not specified, then the ServiceClient must have a endpoint string property that contains the base URL to use.");
-        }
-        // Templatized URLs sometimes reference properties on the ServiceClient child class,
-        // so we have to pass `this` below in order to search these properties if they're
-        // not part of OperationArguments
-        const url = getRequestUrl(endpoint, operationSpec, operationArguments, this);
-        const request = createPipelineRequest({
-            url,
-        });
-        request.method = operationSpec.httpMethod;
-        const operationInfo = getOperationRequestInfo(request);
-        operationInfo.operationSpec = operationSpec;
-        operationInfo.operationArguments = operationArguments;
-        const contentType = operationSpec.contentType || this._requestContentType;
-        if (contentType && operationSpec.requestBody) {
-            request.headers.set("Content-Type", contentType);
-        }
-        const options = operationArguments.options;
-        if (options) {
-            const requestOptions = options.requestOptions;
-            if (requestOptions) {
-                if (requestOptions.timeout) {
-                    request.timeout = requestOptions.timeout;
-                }
-                if (requestOptions.onUploadProgress) {
-                    request.onUploadProgress = requestOptions.onUploadProgress;
-                }
-                if (requestOptions.onDownloadProgress) {
-                    request.onDownloadProgress = requestOptions.onDownloadProgress;
-                }
-                if (requestOptions.shouldDeserialize !== undefined) {
-                    operationInfo.shouldDeserialize = requestOptions.shouldDeserialize;
-                }
-                if (requestOptions.allowInsecureConnection) {
-                    request.allowInsecureConnection = true;
-                }
-            }
-            if (options.abortSignal) {
-                request.abortSignal = options.abortSignal;
-            }
-            if (options.tracingOptions) {
-                request.tracingOptions = options.tracingOptions;
-            }
-        }
-        if (this._allowInsecureConnection) {
-            request.allowInsecureConnection = true;
-        }
-        if (request.streamResponseStatusCodes === undefined) {
-            request.streamResponseStatusCodes = getStreamingResponseStatusCodes(operationSpec);
-        }
-        try {
-            const rawResponse = await this.sendRequest(request);
-            const flatResponse = flattenResponse(rawResponse, operationSpec.responses[rawResponse.status]);
-            if (options?.onResponse) {
-                options.onResponse(rawResponse, flatResponse);
-            }
-            return flatResponse;
-        }
-        catch (error) {
-            if (typeof error === "object" && error?.response) {
-                const rawResponse = error.response;
-                const flatResponse = flattenResponse(rawResponse, operationSpec.responses[error.statusCode] || operationSpec.responses["default"]);
-                error.details = flatResponse;
-                if (options?.onResponse) {
-                    options.onResponse(rawResponse, flatResponse, error);
-                }
-            }
-            throw error;
-        }
-    }
-}
-function createDefaultPipeline(options) {
-    const credentialScopes = getCredentialScopes(options);
-    const credentialOptions = options.credential && credentialScopes
-        ? { credentialScopes, credential: options.credential }
-        : undefined;
-    return createClientPipeline({
-        ...options,
-        credentialOptions,
-    });
-}
-function getCredentialScopes(options) {
-    if (options.credentialScopes) {
-        return options.credentialScopes;
-    }
-    if (options.endpoint) {
-        return `${options.endpoint}/.default`;
-    }
-    if (options.baseUri) {
-        return `${options.baseUri}/.default`;
-    }
-    if (options.credential) {
-        throw new Error(`When using credentials, the ServiceClientOptions must contain either a endpoint or a credentialScopes. Unable to create a bearerTokenAuthenticationPolicy`);
-    }
-    return undefined;
 }
 
 // Copyright (c) Microsoft Corporation.
@@ -63589,20 +61126,29 @@ function parseRefreshTimestamp(body) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const noCorrelationId = "noCorrelationId";
 /**
+ * Returns the authority host from either the options bag or the AZURE_AUTHORITY_HOST environment variable.
+ *
+ * Defaults to {@link DefaultAuthorityHost}.
  * @internal
  */
-function getIdentityClientAuthorityHost(options) {
-    // The authorityHost can come from options or from the AZURE_AUTHORITY_HOST environment variable.
+function getAuthorityHost(options) {
     let authorityHost = options?.authorityHost;
-    // The AZURE_AUTHORITY_HOST environment variable can only be provided in Node.js.
-    {
-        authorityHost = authorityHost ?? process.env.AZURE_AUTHORITY_HOST;
+    if (!authorityHost && isNodeLike) {
+        authorityHost = process.env.AZURE_AUTHORITY_HOST;
     }
-    // If the authorityHost is not provided, we use the default one from the public cloud: https://login.microsoftonline.com
     return authorityHost ?? DefaultAuthorityHost;
 }
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const noCorrelationId = "noCorrelationId";
+const HttpStatus = {
+    CLIENT_ERROR_RANGE_START: 400,
+    CLIENT_ERROR_RANGE_END: 499,
+    SERVER_ERROR_RANGE_START: 500,
+    SERVER_ERROR_RANGE_END: 599,
+};
 /**
  * The network module used by the Identity credentials.
  *
@@ -63618,11 +61164,11 @@ class IdentityClient extends ServiceClient {
     // used for WorkloadIdentity
     tokenCredentialOptions;
     constructor(options) {
-        const packageDetails = `azsdk-js-identity/${SDK_VERSION$1}`;
+        const packageDetails = `azsdk-js-identity/${SDK_VERSION}`;
         const userAgentPrefix = options?.userAgentOptions?.userAgentPrefix
             ? `${options.userAgentOptions.userAgentPrefix} ${packageDetails}`
             : `${packageDetails}`;
-        const baseUri = getIdentityClientAuthorityHost(options);
+        const baseUri = getAuthorityHost(options);
         if (!baseUri.startsWith("https:")) {
             throw new Error("The authorityHost address must use the 'https' protocol.");
         }
@@ -63648,7 +61194,7 @@ class IdentityClient extends ServiceClient {
         }
     }
     async sendTokenRequest(request) {
-        logger$5.info(`IdentityClient: sending token request to [${request.url}]`);
+        logger$2.info(`IdentityClient: sending token request to [${request.url}]`);
         const response = await this.sendRequest(request);
         if (response.bodyAsText && (response.status === 200 || response.status === 201)) {
             const parsedBody = JSON.parse(response.bodyAsText);
@@ -63665,12 +61211,12 @@ class IdentityClient extends ServiceClient {
                 },
                 refreshToken: parsedBody.refresh_token,
             };
-            logger$5.info(`IdentityClient: [${request.url}] token acquired, expires on ${token.accessToken.expiresOnTimestamp}`);
+            logger$2.info(`IdentityClient: [${request.url}] token acquired, expires on ${token.accessToken.expiresOnTimestamp}`);
             return token;
         }
         else {
             const error = new AuthenticationError(response.status, response.bodyAsText);
-            logger$5.warning(`IdentityClient: authentication error. HTTP status: ${response.status}, ${error.errorResponse.errorDescription}`);
+            logger$2.warning(`IdentityClient: authentication error. HTTP status: ${response.status}, ${error.errorResponse.errorDescription}`);
             throw error;
         }
     }
@@ -63678,7 +61224,7 @@ class IdentityClient extends ServiceClient {
         if (refreshToken === undefined) {
             return null;
         }
-        logger$5.info(`IdentityClient: refreshing access token with client ID: ${clientId}, scopes: ${scopes} started`);
+        logger$2.info(`IdentityClient: refreshing access token with client ID: ${clientId}, scopes: ${scopes} started`);
         const refreshParams = {
             grant_type: "refresh_token",
             client_id: clientId,
@@ -63704,7 +61250,7 @@ class IdentityClient extends ServiceClient {
                     tracingOptions: updatedOptions.tracingOptions,
                 });
                 const response = await this.sendTokenRequest(request);
-                logger$5.info(`IdentityClient: refreshed token for client ID: ${clientId}`);
+                logger$2.info(`IdentityClient: refreshed token for client ID: ${clientId}`);
                 return response;
             }
             catch (err) {
@@ -63713,11 +61259,11 @@ class IdentityClient extends ServiceClient {
                     // It's likely that the refresh token has expired, so
                     // return null so that the credential implementation will
                     // initiate the authentication flow again.
-                    logger$5.info(`IdentityClient: interaction required for client ID: ${clientId}`);
+                    logger$2.info(`IdentityClient: interaction required for client ID: ${clientId}`);
                     return null;
                 }
                 else {
-                    logger$5.warning(`IdentityClient: failed refreshing token for client ID: ${clientId}: ${err}`);
+                    logger$2.warning(`IdentityClient: failed refreshing token for client ID: ${clientId}: ${err}`);
                     throw err;
                 }
             }
@@ -63774,7 +61320,7 @@ class IdentityClient extends ServiceClient {
         const response = await this.sendRequest(request);
         this.logIdentifiers(response);
         return {
-            body: response.bodyAsText ? JSON.parse(response.bodyAsText) : undefined,
+            body: this.parseResponseBody(response),
             headers: response.headers.toJSON(),
             status: response.status,
         };
@@ -63792,7 +61338,7 @@ class IdentityClient extends ServiceClient {
         const response = await this.sendRequest(request);
         this.logIdentifiers(response);
         return {
-            body: response.bodyAsText ? JSON.parse(response.bodyAsText) : undefined,
+            body: this.parseResponseBody(response),
             headers: response.headers.toJSON(),
             status: response.status,
         };
@@ -63829,12 +61375,57 @@ class IdentityClient extends ServiceClient {
                 return;
             }
             const base64Metadata = accessToken.split(".")[1];
-            const { appid, upn, tid, oid } = JSON.parse(Buffer.from(base64Metadata, "base64").toString("utf8"));
-            logger$5.info(`[Authenticated account] Client ID: ${appid}. Tenant ID: ${tid}. User Principal Name: ${upn || unavailableUpn}. Object ID (user): ${oid}`);
+            const { appid, upn, tid, oid } = JSON.parse(uint8ArrayToString(stringToUint8Array(base64Metadata, "base64url"), "utf-8"));
+            logger$2.info(`[Authenticated account] Client ID: ${appid}. Tenant ID: ${tid}. User Principal Name: ${upn || unavailableUpn}. Object ID (user): ${oid}`);
         }
         catch (e) {
-            logger$5.warning("allowLoggingAccountIdentifiers was set, but we couldn't log the account information. Error:", e.message);
+            logger$2.warning("allowLoggingAccountIdentifiers was set, but we couldn't log the account information. Error:", e.message);
         }
+    }
+    /**
+     * Parses the response body if possible. Add error properties if parsing fails.
+     * This follows MSAL INetworkModule behavior so the response is in expected format.
+     */
+    parseResponseBody(response) {
+        let parsedBody;
+        try {
+            parsedBody = JSON.parse(response.bodyAsText || "");
+        }
+        catch (error) {
+            logger$2.info(`IdentityClient: Could not parse response body: ${error}`);
+            let errorType;
+            let errorDescriptionHelper;
+            /**
+             * Determine error type based on status code ranges following MSAL patterns:
+             * Client error responses (400 – 499)
+             * Server error responses (500 – 599)
+             */
+            if (response.status >= HttpStatus.CLIENT_ERROR_RANGE_START &&
+                response.status <= HttpStatus.CLIENT_ERROR_RANGE_END) {
+                errorType = "client_error";
+                errorDescriptionHelper = "A client";
+            }
+            else if (response.status >= HttpStatus.SERVER_ERROR_RANGE_START &&
+                response.status <= HttpStatus.SERVER_ERROR_RANGE_END) {
+                errorType = "server_error";
+                errorDescriptionHelper = "A server";
+            }
+            else {
+                errorType = "unknown_error";
+                errorDescriptionHelper = "An unknown";
+            }
+            const errorDescriptionLines = [
+                `${errorDescriptionHelper} error occured.`,
+                `Http status code: ${response.status}`,
+                `Http status message: ${response.bodyAsText || "Unknown"}`,
+                `Headers: ${JSON.stringify(response.headers)}`,
+            ];
+            parsedBody = {
+                error: errorType,
+                error_description: errorDescriptionLines.join("\n"),
+            };
+        }
+        return parsedBody;
     }
 }
 
@@ -64067,10 +61658,9 @@ const msalLogger = credentialLogger("MsalClient");
  */
 function generateMsalConfiguration(clientId, tenantId, msalClientOptions = {}) {
     const resolvedTenant = resolveTenantId(msalClientOptions.logger ?? msalLogger, tenantId, clientId);
-    // TODO: move and reuse getIdentityClientAuthorityHost
     const authority = getAuthority(resolvedTenant, getAuthorityHost(msalClientOptions));
     const httpClient = new IdentityClient({
-        ...msalClientOptions.tokenCredentialOptions,
+        ...msalClientOptions,
         authorityHost: authority,
         loggingOptions: msalClientOptions.loggingOptions,
     });
@@ -64425,8 +62015,8 @@ function createMsalClient(clientId, tenantId, createMsalClientOptions = {}) {
     function createBaseInteractiveRequest(scopes, options) {
         return {
             openBrowser: async (url) => {
-                const open = await import('./index-CYSdDieW.js');
-                await open.default(url, { newInstance: true });
+                const open = await import('./open-BxpcnChj.js');
+                await open.default(url);
             },
             scopes,
             authority: calculateRequestAuthority(options),
@@ -64593,7 +62183,6 @@ class ClientSecretCredential {
         this.msalClient = createMsalClient(clientId, tenantId, {
             ...options,
             logger,
-            tokenCredentialOptions: options,
         });
     }
     /**
@@ -64613,10 +62202,62 @@ class ClientSecretCredential {
     }
 }
 
+const COSIGN_TAG = /^sha256-([a-f0-9]{64})\.(sig|att|sbom)$/;
+/** Returns the digest a cosign signature/attestation/sbom tag refers to, if any. */
+function cosignSubject(tags) {
+    for (const tag of tags) {
+        const match = COSIGN_TAG.exec(tag);
+        if (match)
+            return `sha256:${match[1]}`;
+    }
+    return undefined;
+}
+/** Returns the digests of all manifests that must be kept. Everything else can be deleted. */
+async function selectManifestsToKeep({ manifests, imagesToKeep, deleteOrphanedSignatures, getRelatedDigests, }) {
+    const existingDigests = new Set(manifests.map(m => m.digest));
+    const keep = new Set();
+    // cosign signature tags are not images and must not count towards [imagesToKeep]
+    let imageCount = 0;
+    for (const manifest of manifests) {
+        if (cosignSubject(manifest.tags))
+            continue;
+        if (manifest.tags.length && imageCount++ < imagesToKeep) {
+            keep.add(manifest.digest);
+        }
+    }
+    // artifacts referenced by a kept manifest are kept too. runs until nothing new
+    // is added, so nested references are covered
+    let pending = [...keep];
+    while (pending.length) {
+        const next = [];
+        for (const digest of pending) {
+            for (const related of await getRelatedDigests(digest)) {
+                if (!keep.has(related)) {
+                    keep.add(related);
+                    next.push(related);
+                }
+            }
+        }
+        pending = next;
+    }
+    // cosign signatures follow their subject. a signature whose subject does not exist
+    // (orphan) is only kept if [deleteOrphanedSignatures] is disabled
+    for (const manifest of manifests) {
+        const subject = cosignSubject(manifest.tags);
+        if (!subject)
+            continue;
+        if (keep.has(subject) || (!existingDigests.has(subject) && !deleteOrphanedSignatures)) {
+            keep.add(manifest.digest);
+        }
+    }
+    return keep;
+}
+
 async function run() {
     let totalDeletedImages = 0;
     try {
         const imagesToKeep = parseInt(getInput('keep'), 10);
+        const deleteOrphanedSignatures = getBooleanInput('deleteOrphanedSignatures');
         const endpoint = getInput('endpoint');
         const repos = getInput('repos')
             .split(/[,;\n\s]/)
@@ -64641,38 +62282,42 @@ async function run() {
                 audience = KnownContainerRegistryAudience.AzureResourceManagerPublicCloud;
                 break;
         }
-        debug(`imagesToKeep: ${imagesToKeep}`);
-        debug(`endpoint: ${endpoint}`);
-        debug(`audience: ${audience}`);
-        debug(`repos: ${repos}`);
-        debug(`has tenantId: ${tenantId && tenantId !== ''}`);
-        debug(`has secret: ${secret && secret !== ''}`);
-        debug(`has clientId: ${clientId && clientId !== ''}`);
+        debug$3(`imagesToKeep: ${imagesToKeep}`);
+        debug$3(`deleteOrphanedSignatures: ${deleteOrphanedSignatures}`);
+        debug$3(`endpoint: ${endpoint}`);
+        debug$3(`audience: ${audience}`);
+        debug$3(`repos: ${repos}`);
+        debug$3(`has tenantId: ${tenantId && tenantId !== ''}`);
+        debug$3(`has secret: ${secret && secret !== ''}`);
+        debug$3(`has clientId: ${clientId && clientId !== ''}`);
         const client = new ContainerRegistryClient(endpoint, new ClientSecretCredential(tenantId, clientId, secret), {
             audience,
         });
         for (const repoName of repos) {
             await group(`🔍 Cleanup ${repoName}`, async () => {
                 const repo = client.getRepository(repoName);
-                // artifacts must be listed in descending order so that any related manifest will come after it.
-                // reversing the order could cause a manifest to become corrupted
-                const imageManifests = repo.listManifestProperties({
+                // pass 1: read all manifests, newest first
+                const manifests = [];
+                for await (const manifest of repo.listManifestProperties({
                     order: 'LastUpdatedOnDescending',
+                })) {
+                    manifests.push({ digest: manifest.digest, tags: manifest.tags ?? [] });
+                }
+                // pass 2: decide which manifests to keep
+                const keep = await selectManifestsToKeep({
+                    manifests,
+                    imagesToKeep,
+                    deleteOrphanedSignatures,
+                    getRelatedDigests: async (digest) => {
+                        const properties = await repo.getArtifact(digest).getManifestProperties();
+                        return properties.relatedArtifacts.map(related => related.digest);
+                    },
                 });
-                let imageCount = 0;
+                // pass 3: delete everything that is not kept
                 let deletedImages = 0;
-                const artifactsToKeep = [];
-                for await (const manifest of imageManifests) {
-                    // get manifest properties to retrieve the related artifacts data
-                    const manifestProperties = await repo
-                        .getArtifact(manifest.digest)
-                        .getManifestProperties();
-                    // retain artifact only if it is tagged and still within the [imagesToKeep] limit or required by another artifact
-                    if ((manifest.tags.length && imageCount++ < imagesToKeep) ||
-                        artifactsToKeep.includes(manifest.digest)) {
-                        artifactsToKeep.push(...manifestProperties.relatedArtifacts.map(el => el.digest));
+                for (const manifest of manifests) {
+                    if (keep.has(manifest.digest))
                         continue;
-                    }
                     await repo.getArtifact(manifest.digest).delete();
                     info(`Deleted image: ${manifest.digest} - Tags: ${manifest.tags.length ? manifest.tags.join(', ') : '<null>'}`);
                     deletedImages++;

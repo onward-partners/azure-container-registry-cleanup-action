@@ -32,24 +32,24 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@azure/container-registry": "^1.1.2",
-    "@azure/identity": "^4.13.2"
+    "@azure/identity": "^4.14.1"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
-    "@rollup/plugin-typescript": "^12.3.0",
+    "@rollup/plugin-typescript": "^12.3.1",
     "@types/node": "^24.10.1",
-    "@typescript-eslint/eslint-plugin": "^8.68.0",
-    "@typescript-eslint/parser": "^8.68.0",
-    "eslint": "^10.9.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
+    "eslint": "^10.14.0",
     "eslint-plugin-github": "^6.1.2",
-    "globals": "^17.11.0",
-    "js-yaml": "^5.4.1",
-    "prettier": "3.9.6",
-    "rollup": "^4.63.1",
+    "globals": "^17.14.0",
+    "js-yaml": "^5.5.0",
+    "prettier": "3.10.1",
+    "rollup": "^4.68.2",
     "typescript": "6.0.3"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.63.1"
+    "@rollup/rollup-linux-x64-gnu": "^4.68.2"
   }
 }

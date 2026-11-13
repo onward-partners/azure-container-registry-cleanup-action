@@ -1,12 +1,12 @@
 import typescriptEslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import { defineConfig, globalIgnores } from 'eslint/config';
 import globals from 'globals';
 
-export default [
+export default defineConfig([
+  globalIgnores(['**/dist/', '**/node_modules/']),
   {
-    ignores: ['**/dist/', '**/node_modules/'],
-  },
-  {
+    files: ['**/*.ts'],
     plugins: {
       '@typescript-eslint': typescriptEslint,
     },
@@ -17,7 +17,7 @@ export default [
       },
 
       parser: tsParser,
-      ecmaVersion: 9,
+      ecmaVersion: 'latest',
       sourceType: 'module',
 
       parserOptions: {
@@ -26,8 +26,6 @@ export default [
     },
 
     rules: {
-      'eslint-comments/no-use': 'off',
-      'import/no-namespace': 'off',
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': 'error',
 
@@ -52,9 +50,8 @@ export default [
         },
       ],
 
-      '@typescript-eslint/func-call-spacing': ['error', 'never'],
       '@typescript-eslint/no-array-constructor': 'error',
-      '@typescript-eslint/no-empty-interface': 'error',
+      '@typescript-eslint/no-empty-object-type': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-extraneous-class': 'error',
       '@typescript-eslint/no-for-in-array': 'error',
@@ -65,7 +62,6 @@ export default [
       '@typescript-eslint/no-unnecessary-qualifier': 'error',
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
       '@typescript-eslint/no-useless-constructor': 'error',
-      '@typescript-eslint/no-var-requires': 'error',
       '@typescript-eslint/prefer-for-of': 'warn',
       '@typescript-eslint/prefer-function-type': 'warn',
       '@typescript-eslint/prefer-includes': 'error',
@@ -73,10 +69,7 @@ export default [
       '@typescript-eslint/promise-function-async': 'error',
       '@typescript-eslint/require-array-sort-compare': 'error',
       '@typescript-eslint/restrict-plus-operands': 'error',
-      semi: 'off',
-      '@typescript-eslint/semi': 'off',
-      '@typescript-eslint/type-annotation-spacing': 'error',
       '@typescript-eslint/unbound-method': 'error',
     },
   },
-];
+]);

@@ -68,7 +68,7 @@ Write-Host "Make sure the version field in package.json is " -NoNewline
 Write-Host $new_tag -ForegroundColor Blue -NoNewline
 $YN = Read-Host ". Yes? [Y/n]"
 
-if ($YN -ne 'y' -and $YN -ne 'Y') {
+if ($YN -ne '' -and $YN -ne 'y' -and $YN -ne 'Y') {
     # Package.json version field is not up to date
     Write-Host "Please update the package.json version to " -NoNewline
     Write-Host $new_tag -ForegroundColor Magenta -NoNewline

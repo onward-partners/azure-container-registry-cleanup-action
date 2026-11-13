@@ -68,10 +68,10 @@ else
 fi
 
 # 5. Remind user to update the version field in package.json
-echo -e -n "Make sure the version field in package.json is ${BOLD_BLUE}$new_tag${OFF}. Yes? [Y/${BOLD_UNDERLINED}n${OFF}] "
+echo -e -n "Make sure the version field in package.json is ${BOLD_BLUE}$new_tag${OFF}. Yes? [${BOLD_UNDERLINED}Y${OFF}/n] "
 read -r YN
 
-if [[ ! ($YN == "y" || $YN == "Y") ]]; then
+if [[ ! ($YN == "" || $YN == "y" || $YN == "Y") ]]; then
 	# Package.json version field is not up to date
 	echo -e "Please update the package.json version to ${BOLD_PURPLE}$new_tag${OFF} and commit your changes"
 	exit 1

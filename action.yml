@@ -10,6 +10,10 @@ inputs:
     required: false
     description: 'If set to true all untagged images will not add to the amount of kept images'
     default: 'true'
+  deleteOrphanedSignatures:
+    required: false
+    description: 'Cosign signatures/attestations (sha256-<digest>.sig/.att/.sbom) are kept or deleted together with the image they belong to. If set to true, signatures whose image no longer exists are deleted as well. Set to false to keep them'
+    default: 'true'
   tenantId:
     required: true
     description: 'Azure Tenant ID'

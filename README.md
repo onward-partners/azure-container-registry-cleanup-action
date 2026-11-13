@@ -12,6 +12,10 @@ Amount of images to keep. Default: `3`
 
 If set to true all untagged images will not add to the amount of kept images. Default: `true`
 
+### `deleteOrphanedSignatures`
+
+Cosign signatures, attestations and SBOMs (tags `sha256-<digest>.sig`, `.att`, `.sbom`) are not counted towards `keep`. They are kept or deleted together with the image they belong to. If set to `true`, signatures whose image no longer exists in the repository are deleted as well; set to `false` to keep them. Default: `true`
+
 ### `tenantId`
 
 **Required** Azure Tenant ID

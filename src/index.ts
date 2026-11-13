@@ -1,11 +1,13 @@
-import { debug, getInput, group, info, setFailed, setOutput } from '@actions/core';
+import { debug, getBooleanInput, getInput, group, info, setFailed, setOutput } from '@actions/core';
 import { ContainerRegistryClient, KnownContainerRegistryAudience } from '@azure/container-registry';
 import { ClientSecretCredential } from '@azure/identity';
+import { ManifestInfo, selectManifestsToKeep } from './select.js';
 
 async function run(): Promise<void> {
   let totalDeletedImages = 0;
   try {
     const imagesToKeep = parseInt(getInput('keep'), 10);
+    const deleteOrphanedSignatures = getBooleanInput('deleteOrphanedSignatures');
     const endpoint = getInput('endpoint');
     const repos = getInput('repos')
       .split(/[,;\n\s]/)
@@ -33,6 +35,7 @@ async function run(): Promise<void> {
     }
 
     debug(`imagesToKeep: ${imagesToKeep}`);
+    debug(`deleteOrphanedSignatures: ${deleteOrphanedSignatures}`);
     debug(`endpoint: ${endpoint}`);
     debug(`audience: ${audience}`);
     debug(`repos: ${repos}`);
@@ -52,30 +55,29 @@ async function run(): Promise<void> {
       await group(`🔍 Cleanup ${repoName}`, async () => {
         const repo = client.getRepository(repoName);
 
-        // artifacts must be listed in descending order so that any related manifest will come after it.
-        // reversing the order could cause a manifest to become corrupted
-        const imageManifests = repo.listManifestProperties({
+        // pass 1: read all manifests, newest first
+        const manifests: ManifestInfo[] = [];
+        for await (const manifest of repo.listManifestProperties({
           order: 'LastUpdatedOnDescending',
+        })) {
+          manifests.push({ digest: manifest.digest, tags: manifest.tags ?? [] });
+        }
+
+        // pass 2: decide which manifests to keep
+        const keep = await selectManifestsToKeep({
+          manifests,
+          imagesToKeep,
+          deleteOrphanedSignatures,
+          getRelatedDigests: async digest => {
+            const properties = await repo.getArtifact(digest).getManifestProperties();
+            return properties.relatedArtifacts.map(related => related.digest);
+          },
         });
 
-        let imageCount = 0;
+        // pass 3: delete everything that is not kept
         let deletedImages = 0;
-        const artifactsToKeep: string[] = [];
-        for await (const manifest of imageManifests) {
-          // get manifest properties to retrieve the related artifacts data
-          const manifestProperties = await repo
-            .getArtifact(manifest.digest)
-            .getManifestProperties();
-
-          // retain artifact only if it is tagged and still within the [imagesToKeep] limit or required by another artifact
-          if (
-            (manifest.tags.length && imageCount++ < imagesToKeep) ||
-            artifactsToKeep.includes(manifest.digest)
-          ) {
-            artifactsToKeep.push(...manifestProperties.relatedArtifacts.map(el => el.digest));
-            continue;
-          }
-
+        for (const manifest of manifests) {
+          if (keep.has(manifest.digest)) continue;
           await repo.getArtifact(manifest.digest).delete();
           info(
             `Deleted image: ${manifest.digest} - Tags: ${manifest.tags.length ? manifest.tags.join(', ') : '<null>'}`,

@@ -9,7 +9,8 @@
     "format:write": "prettier --write .",
     "lint": "eslint src/**/*.ts",
     "package": "npx rimraf ./dist && npx rollup --config rollup.config.ts --configPlugin @rollup/plugin-typescript",
-    "package:watch": "npm run package -- --watch"
+    "package:watch": "npm run package -- --watch",
+    "test": "vitest run"
   },
   "type": "module",
   "repository": {
@@ -47,7 +48,8 @@
     "js-yaml": "^5.5.0",
     "prettier": "3.10.1",
     "rollup": "^4.68.2",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^5.1.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.68.2"

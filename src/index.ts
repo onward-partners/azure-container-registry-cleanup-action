@@ -1,6 +1,20 @@
-import { debug, getBooleanInput, getInput, group, info, setFailed, setOutput } from '@actions/core';
+import {
+  debug,
+  getBooleanInput,
+  getIDToken,
+  getInput,
+  group,
+  info,
+  setFailed,
+  setOutput,
+  setSecret,
+} from '@actions/core';
 import { ContainerRegistryClient, KnownContainerRegistryAudience } from '@azure/container-registry';
-import { ClientSecretCredential } from '@azure/identity';
+import {
+  ClientAssertionCredential,
+  ClientSecretCredential,
+  TokenCredential,
+} from '@azure/identity';
 import { ManifestInfo, selectManifestsToKeep } from './select.js';
 
 async function run(): Promise<void> {
@@ -17,6 +31,7 @@ async function run(): Promise<void> {
     const secret = getInput('secret');
     const clientId = getInput('clientId');
     const audienceString = getInput('audience');
+    const oidcAudience = getInput('oidcAudience') || 'api://AzureADTokenExchange';
 
     let audience: KnownContainerRegistryAudience;
     switch (audienceString.toLowerCase()) {
@@ -43,13 +58,24 @@ async function run(): Promise<void> {
     debug(`has secret: ${secret && secret !== ''}`);
     debug(`has clientId: ${clientId && clientId !== ''}`);
 
-    const client = new ContainerRegistryClient(
-      endpoint,
-      new ClientSecretCredential(tenantId, clientId, secret),
-      {
-        audience,
-      },
-    );
+    let credential: TokenCredential;
+    if (secret) {
+      info('Authenticating with client secret');
+      credential = new ClientSecretCredential(tenantId, clientId, secret);
+    } else {
+      // No secret given: use the GitHub OIDC token as a federated credential.
+      // Requires `permissions: id-token: write` and a federated credential on the Azure app registration.
+      info('No secret provided, authenticating with GitHub OIDC');
+      credential = new ClientAssertionCredential(tenantId, clientId, async () => {
+        const token = await getIDToken(oidcAudience);
+        setSecret(token);
+        return token;
+      });
+    }
+
+    const client = new ContainerRegistryClient(endpoint, credential, {
+      audience,
+    });
 
     for (const repoName of repos) {
       await group(`🔍 Cleanup ${repoName}`, async () => {

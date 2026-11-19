@@ -22,7 +22,11 @@ Cosign signatures, attestations and SBOMs (tags `sha256-<digest>.sig`, `.att`, `
 
 ### `secret`
 
-**Required** Azure Secret
+Azure client secret. If omitted, the action authenticates via GitHub OIDC (see [Authentication with OIDC](#authentication-with-oidc)).
+
+### `oidcAudience`
+
+Audience of the GitHub OIDC token, used when no `secret` is provided. Default: `api://AzureADTokenExchange`
 
 ### `clientId`
 
@@ -83,5 +87,28 @@ jobs:
           secret: <Azure-Secret>
           clientId: <Azure-Client-ID>
           repos: repo-a repo-b,repo-c;repo-d
+          endpoint: example.azurecr.io
+```
+
+## Authentication with OIDC
+
+Instead of storing a client secret you can let the action authenticate with the GitHub OIDC token (workload identity federation):
+
+1. In Azure, add a **federated credential** to your app registration (issuer `https://token.actions.githubusercontent.com`, subject e.g. `repo:<owner>/<repo>:ref:refs/heads/main`, audience `api://AzureADTokenExchange`).
+2. Grant the app registration the `AcrDelete` and `AcrPull` roles on the registry.
+3. Give the job `id-token: write` permission and omit `secret`:
+
+```yaml
+jobs:
+  cleanup-acr:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: i40MC/azure-container-registry-cleanup-action@v2
+        with:
+          tenantId: <Azure-Tenant-ID>
+          clientId: <Azure-Client-ID>
+          repos: repo-a repo-b
           endpoint: example.azurecr.io
 ```

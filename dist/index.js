@@ -7,7 +7,8 @@ import { promises } from 'fs';
 import 'path';
 import * as http from 'http';
 import http__default from 'http';
-import https, { Agent as Agent$1 } from 'https';
+import * as https from 'https';
+import https__default, { Agent as Agent$1 } from 'https';
 import * as net from 'net';
 import * as tls from 'tls';
 import tls__default from 'tls';
@@ -35,14 +36,14 @@ import require$$1$3 from 'node:dns';
 import require$$5$4 from 'string_decoder';
 import 'child_process';
 import 'timers';
+import { randomUUID as randomUUID$1 } from 'node:crypto';
+import require$$0$7 from 'buffer';
+import require$$3, { Readable } from 'stream';
 import os$1, { EOL } from 'node:os';
 import process$1 from 'node:process';
-import require$$3, { Readable } from 'stream';
 import require$$0$6 from 'tty';
 import { URL as URL$1 } from 'url';
 import https$1 from 'node:https';
-import { randomUUID as randomUUID$1 } from 'node:crypto';
-import require$$0$7 from 'buffer';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -198,6 +199,96 @@ function prepareKeyValueMessage(key, value) {
     return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
 }
 
+function getProxyUrl(reqUrl) {
+    const usingSsl = reqUrl.protocol === 'https:';
+    if (checkBypass(reqUrl)) {
+        return undefined;
+    }
+    const proxyVar = (() => {
+        if (usingSsl) {
+            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
+        }
+        else {
+            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
+        }
+    })();
+    if (proxyVar) {
+        try {
+            return new DecodedURL(proxyVar);
+        }
+        catch (_a) {
+            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+                return new DecodedURL(`http://${proxyVar}`);
+        }
+    }
+    else {
+        return undefined;
+    }
+}
+function checkBypass(reqUrl) {
+    if (!reqUrl.hostname) {
+        return false;
+    }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
+    }
+    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
+    if (!noProxy) {
+        return false;
+    }
+    // Determine the request port
+    let reqPort;
+    if (reqUrl.port) {
+        reqPort = Number(reqUrl.port);
+    }
+    else if (reqUrl.protocol === 'http:') {
+        reqPort = 80;
+    }
+    else if (reqUrl.protocol === 'https:') {
+        reqPort = 443;
+    }
+    // Format the request hostname and hostname with port
+    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
+    if (typeof reqPort === 'number') {
+        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
+    }
+    // Compare request host against noproxy
+    for (const upperNoProxyItem of noProxy
+        .split(',')
+        .map(x => x.trim().toUpperCase())
+        .filter(x => x)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
+class DecodedURL extends URL {
+    constructor(url, base) {
+        super(url, base);
+        this._decodedUsername = decodeURIComponent(super.username);
+        this._decodedPassword = decodeURIComponent(super.password);
+    }
+    get username() {
+        return this._decodedUsername;
+    }
+    get password() {
+        return this._decodedPassword;
+    }
+}
+
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
 function getDefaultExportFromCjs (x) {
@@ -213,7 +304,7 @@ function requireTunnel$1 () {
 	hasRequiredTunnel$1 = 1;
 	var tls = tls__default;
 	var http = http__default;
-	var https$1 = https;
+	var https = https__default;
 	var events = events$1;
 	var util = require$$5;
 
@@ -240,13 +331,13 @@ function requireTunnel$1 () {
 
 	function httpOverHttps(options) {
 	  var agent = new TunnelingAgent(options);
-	  agent.request = https$1.request;
+	  agent.request = https.request;
 	  return agent;
 	}
 
 	function httpsOverHttps(options) {
 	  var agent = new TunnelingAgent(options);
-	  agent.request = https$1.request;
+	  agent.request = https.request;
 	  agent.createSocket = createSecureSocket;
 	  agent.defaultPort = 443;
 	  return agent;
@@ -484,7 +575,7 @@ function requireTunnel () {
 	return tunnel;
 }
 
-requireTunnel();
+var tunnelExports = requireTunnel();
 
 var undici = {};
 
@@ -28570,10 +28661,10 @@ function requireUndici () {
 	return undici;
 }
 
-requireUndici();
+var undiciExports = requireUndici();
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$3 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28621,20 +28712,637 @@ var MediaTypes;
 (function (MediaTypes) {
     MediaTypes["ApplicationJson"] = "application/json";
 })(MediaTypes || (MediaTypes = {}));
-[
+const HttpRedirectCodes = [
     HttpCodes.MovedPermanently,
     HttpCodes.ResourceMoved,
     HttpCodes.SeeOther,
     HttpCodes.TemporaryRedirect,
     HttpCodes.PermanentRedirect
 ];
-[
+const HttpResponseRetryCodes = [
     HttpCodes.BadGateway,
     HttpCodes.ServiceUnavailable,
     HttpCodes.GatewayTimeout
 ];
+const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
+const ExponentialBackoffCeiling = 10;
+const ExponentialBackoffTimeSlice = 5;
+class HttpClientError extends Error {
+    constructor(message, statusCode) {
+        super(message);
+        this.name = 'HttpClientError';
+        this.statusCode = statusCode;
+        Object.setPrototypeOf(this, HttpClientError.prototype);
+    }
+}
+class HttpClientResponse {
+    constructor(message) {
+        this.message = message;
+    }
+    readBody() {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$3(this, void 0, void 0, function* () {
+                let output = Buffer.alloc(0);
+                this.message.on('data', (chunk) => {
+                    output = Buffer.concat([output, chunk]);
+                });
+                this.message.on('end', () => {
+                    resolve(output.toString());
+                });
+            }));
+        });
+    }
+    readBodyBuffer() {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter$3(this, void 0, void 0, function* () {
+                const chunks = [];
+                this.message.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                this.message.on('end', () => {
+                    resolve(Buffer.concat(chunks));
+                });
+            }));
+        });
+    }
+}
+let HttpClient$1 = class HttpClient {
+    constructor(userAgent, handlers, requestOptions) {
+        this._ignoreSslError = false;
+        this._allowRedirects = true;
+        this._allowRedirectDowngrade = false;
+        this._maxRedirects = 50;
+        this._allowRetries = false;
+        this._maxRetries = 1;
+        this._keepAlive = false;
+        this._disposed = false;
+        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
+        this.handlers = handlers || [];
+        this.requestOptions = requestOptions;
+        if (requestOptions) {
+            if (requestOptions.ignoreSslError != null) {
+                this._ignoreSslError = requestOptions.ignoreSslError;
+            }
+            this._socketTimeout = requestOptions.socketTimeout;
+            if (requestOptions.allowRedirects != null) {
+                this._allowRedirects = requestOptions.allowRedirects;
+            }
+            if (requestOptions.allowRedirectDowngrade != null) {
+                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
+            }
+            if (requestOptions.maxRedirects != null) {
+                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
+            }
+            if (requestOptions.keepAlive != null) {
+                this._keepAlive = requestOptions.keepAlive;
+            }
+            if (requestOptions.allowRetries != null) {
+                this._allowRetries = requestOptions.allowRetries;
+            }
+            if (requestOptions.maxRetries != null) {
+                this._maxRetries = requestOptions.maxRetries;
+            }
+        }
+    }
+    options(requestUrl, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    get(requestUrl, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('GET', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    del(requestUrl, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    post(requestUrl, data, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('POST', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    patch(requestUrl, data, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    put(requestUrl, data, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('PUT', requestUrl, data, additionalHeaders || {});
+        });
+    }
+    head(requestUrl, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
+        });
+    }
+    sendStream(verb, requestUrl, stream, additionalHeaders) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return this.request(verb, requestUrl, stream, additionalHeaders);
+        });
+    }
+    /**
+     * Gets a typed object from an endpoint
+     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
+     */
+    getJson(requestUrl_1) {
+        return __awaiter$3(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes.ApplicationJson);
+            const res = yield this.get(requestUrl, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    postJson(requestUrl_1, obj_1) {
+        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers$1.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.post(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    putJson(requestUrl_1, obj_1) {
+        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers$1.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.put(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    patchJson(requestUrl_1, obj_1) {
+        return __awaiter$3(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+            const data = JSON.stringify(obj, null, 2);
+            additionalHeaders[Headers$1.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers$1.Accept, MediaTypes.ApplicationJson);
+            additionalHeaders[Headers$1.ContentType] =
+                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+            const res = yield this.patch(requestUrl, data, additionalHeaders);
+            return this._processResponse(res, this.requestOptions);
+        });
+    }
+    /**
+     * Makes a raw http request.
+     * All other methods such as get, post, patch, and request ultimately call this.
+     * Prefer get, del, post and patch
+     */
+    request(verb, requestUrl, data, headers) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            if (this._disposed) {
+                throw new Error('Client has already been disposed.');
+            }
+            const parsedUrl = new URL(requestUrl);
+            let info = this._prepareRequest(verb, parsedUrl, headers);
+            // Only perform retries on reads since writes may not be idempotent.
+            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
+                ? this._maxRetries + 1
+                : 1;
+            let numTries = 0;
+            let response;
+            do {
+                response = yield this.requestRaw(info, data);
+                // Check if it's an authentication challenge
+                if (response &&
+                    response.message &&
+                    response.message.statusCode === HttpCodes.Unauthorized) {
+                    let authenticationHandler;
+                    for (const handler of this.handlers) {
+                        if (handler.canHandleAuthentication(response)) {
+                            authenticationHandler = handler;
+                            break;
+                        }
+                    }
+                    if (authenticationHandler) {
+                        return authenticationHandler.handleAuthentication(this, info, data);
+                    }
+                    else {
+                        // We have received an unauthorized response but have no handlers to handle it.
+                        // Let the response return to the caller.
+                        return response;
+                    }
+                }
+                let redirectsRemaining = this._maxRedirects;
+                while (response.message.statusCode &&
+                    HttpRedirectCodes.includes(response.message.statusCode) &&
+                    this._allowRedirects &&
+                    redirectsRemaining > 0) {
+                    const redirectUrl = response.message.headers['location'];
+                    if (!redirectUrl) {
+                        // if there's no location to redirect to, we won't
+                        break;
+                    }
+                    const parsedRedirectUrl = new URL(redirectUrl);
+                    if (parsedUrl.protocol === 'https:' &&
+                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
+                        !this._allowRedirectDowngrade) {
+                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
+                    }
+                    // we need to finish reading the response before reassigning response
+                    // which will leak the open socket.
+                    yield response.readBody();
+                    // strip authorization header if redirected to a different hostname
+                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+                        for (const header in headers) {
+                            // header names are case insensitive
+                            if (header.toLowerCase() === 'authorization') {
+                                delete headers[header];
+                            }
+                        }
+                    }
+                    // let's make the request with the new redirectUrl
+                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
+                    response = yield this.requestRaw(info, data);
+                    redirectsRemaining--;
+                }
+                if (!response.message.statusCode ||
+                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
+                    // If not a retry code, return immediately instead of retrying
+                    return response;
+                }
+                numTries += 1;
+                if (numTries < maxTries) {
+                    yield response.readBody();
+                    yield this._performExponentialBackoff(numTries);
+                }
+            } while (numTries < maxTries);
+            return response;
+        });
+    }
+    /**
+     * Needs to be called if keepAlive is set to true in request options.
+     */
+    dispose() {
+        if (this._agent) {
+            this._agent.destroy();
+        }
+        this._disposed = true;
+    }
+    /**
+     * Raw request.
+     * @param info
+     * @param data
+     */
+    requestRaw(info, data) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => {
+                function callbackForResult(err, res) {
+                    if (err) {
+                        reject(err);
+                    }
+                    else if (!res) {
+                        // If `err` is not passed, then `res` must be passed.
+                        reject(new Error('Unknown error'));
+                    }
+                    else {
+                        resolve(res);
+                    }
+                }
+                this.requestRawWithCallback(info, data, callbackForResult);
+            });
+        });
+    }
+    /**
+     * Raw request with callback.
+     * @param info
+     * @param data
+     * @param onResult
+     */
+    requestRawWithCallback(info, data, onResult) {
+        if (typeof data === 'string') {
+            if (!info.options.headers) {
+                info.options.headers = {};
+            }
+            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
+        }
+        let callbackCalled = false;
+        function handleResult(err, res) {
+            if (!callbackCalled) {
+                callbackCalled = true;
+                onResult(err, res);
+            }
+        }
+        const req = info.httpModule.request(info.options, (msg) => {
+            const res = new HttpClientResponse(msg);
+            handleResult(undefined, res);
+        });
+        let socket;
+        req.on('socket', sock => {
+            socket = sock;
+        });
+        // If we ever get disconnected, we want the socket to timeout eventually
+        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
+            if (socket) {
+                socket.end();
+            }
+            handleResult(new Error(`Request timeout: ${info.options.path}`));
+        });
+        req.on('error', function (err) {
+            // err has statusCode property
+            // res should have headers
+            handleResult(err);
+        });
+        if (data && typeof data === 'string') {
+            req.write(data, 'utf8');
+        }
+        if (data && typeof data !== 'string') {
+            data.on('close', function () {
+                req.end();
+            });
+            data.pipe(req);
+        }
+        else {
+            req.end();
+        }
+    }
+    /**
+     * Gets an http agent. This function is useful when you need an http agent that handles
+     * routing through a proxy server - depending upon the url and proxy environment variables.
+     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+     */
+    getAgent(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        return this._getAgent(parsedUrl);
+    }
+    getAgentDispatcher(serverUrl) {
+        const parsedUrl = new URL(serverUrl);
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (!useProxy) {
+            return;
+        }
+        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
+    }
+    _prepareRequest(method, requestUrl, headers) {
+        const info = {};
+        info.parsedUrl = requestUrl;
+        const usingSsl = info.parsedUrl.protocol === 'https:';
+        info.httpModule = usingSsl ? https : http;
+        const defaultPort = usingSsl ? 443 : 80;
+        info.options = {};
+        info.options.host = info.parsedUrl.hostname;
+        info.options.port = info.parsedUrl.port
+            ? parseInt(info.parsedUrl.port)
+            : defaultPort;
+        info.options.path =
+            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
+        info.options.method = method;
+        info.options.headers = this._mergeHeaders(headers);
+        if (this.userAgent != null) {
+            info.options.headers['user-agent'] = this.userAgent;
+        }
+        info.options.agent = this._getAgent(info.parsedUrl);
+        // gives handlers an opportunity to participate
+        if (this.handlers) {
+            for (const handler of this.handlers) {
+                handler.prepareRequest(info.options);
+            }
+        }
+        return info;
+    }
+    _mergeHeaders(headers) {
+        if (this.requestOptions && this.requestOptions.headers) {
+            return Object.assign({}, lowercaseKeys(this.requestOptions.headers), lowercaseKeys(headers || {}));
+        }
+        return lowercaseKeys(headers || {});
+    }
+    /**
+     * Gets an existing header value or returns a default.
+     * Handles converting number header values to strings since HTTP headers must be strings.
+     * Note: This returns string | string[] since some headers can have multiple values.
+     * For headers that must always be a single string (like Content-Type), use the
+     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+     */
+    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
+            if (headerValue) {
+                clientHeader =
+                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+            }
+        }
+        const additionalValue = additionalHeaders[header];
+        if (additionalValue !== undefined) {
+            return typeof additionalValue === 'number'
+                ? additionalValue.toString()
+                : additionalValue;
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    /**
+     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+     * Always returns a single string (not an array) since Content-Type should be a single value.
+     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+     */
+    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+        let clientHeader;
+        if (this.requestOptions && this.requestOptions.headers) {
+            const headerValue = lowercaseKeys(this.requestOptions.headers)[Headers$1.ContentType];
+            if (headerValue) {
+                if (typeof headerValue === 'number') {
+                    clientHeader = String(headerValue);
+                }
+                else if (Array.isArray(headerValue)) {
+                    clientHeader = headerValue.join(', ');
+                }
+                else {
+                    clientHeader = headerValue;
+                }
+            }
+        }
+        const additionalValue = additionalHeaders[Headers$1.ContentType];
+        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+        if (additionalValue !== undefined) {
+            if (typeof additionalValue === 'number') {
+                return String(additionalValue);
+            }
+            else if (Array.isArray(additionalValue)) {
+                return additionalValue.join(', ');
+            }
+            else {
+                return additionalValue;
+            }
+        }
+        if (clientHeader !== undefined) {
+            return clientHeader;
+        }
+        return _default;
+    }
+    _getAgent(parsedUrl) {
+        let agent;
+        const proxyUrl = getProxyUrl(parsedUrl);
+        const useProxy = proxyUrl && proxyUrl.hostname;
+        if (this._keepAlive && useProxy) {
+            agent = this._proxyAgent;
+        }
+        if (!useProxy) {
+            agent = this._agent;
+        }
+        // if agent is already assigned use that agent.
+        if (agent) {
+            return agent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        let maxSockets = 100;
+        if (this.requestOptions) {
+            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
+        }
+        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
+        if (proxyUrl && proxyUrl.hostname) {
+            const agentOptions = {
+                maxSockets,
+                keepAlive: this._keepAlive,
+                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
+                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
+                })), { host: proxyUrl.hostname, port: proxyUrl.port })
+            };
+            let tunnelAgent;
+            const overHttps = proxyUrl.protocol === 'https:';
+            if (usingSsl) {
+                tunnelAgent = overHttps ? tunnelExports.httpsOverHttps : tunnelExports.httpsOverHttp;
+            }
+            else {
+                tunnelAgent = overHttps ? tunnelExports.httpOverHttps : tunnelExports.httpOverHttp;
+            }
+            agent = tunnelAgent(agentOptions);
+            this._proxyAgent = agent;
+        }
+        // if tunneling agent isn't assigned create a new agent
+        if (!agent) {
+            const options = { keepAlive: this._keepAlive, maxSockets };
+            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
+            this._agent = agent;
+        }
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            agent.options = Object.assign(agent.options || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return agent;
+    }
+    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
+        let proxyAgent;
+        if (this._keepAlive) {
+            proxyAgent = this._proxyAgentDispatcher;
+        }
+        // if agent is already assigned use that agent.
+        if (proxyAgent) {
+            return proxyAgent;
+        }
+        const usingSsl = parsedUrl.protocol === 'https:';
+        proxyAgent = new undiciExports.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
+            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
+        })));
+        this._proxyAgentDispatcher = proxyAgent;
+        if (usingSsl && this._ignoreSslError) {
+            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+            // we have to cast it to any and change it directly
+            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
+                rejectUnauthorized: false
+            });
+        }
+        return proxyAgent;
+    }
+    _getUserAgentWithOrchestrationId(userAgent) {
+        const baseUserAgent = userAgent || 'actions/http-client';
+        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+        if (orchId) {
+            // Sanitize the orchestration ID to ensure it contains only valid characters
+            // Valid characters: 0-9, a-z, _, -, .
+            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+        }
+        return baseUserAgent;
+    }
+    _performExponentialBackoff(retryNumber) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
+            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
+            return new Promise(resolve => setTimeout(() => resolve(), ms));
+        });
+    }
+    _processResponse(res, options) {
+        return __awaiter$3(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => __awaiter$3(this, void 0, void 0, function* () {
+                const statusCode = res.message.statusCode || 0;
+                const response = {
+                    statusCode,
+                    result: null,
+                    headers: {}
+                };
+                // not found leads to null obj returned
+                if (statusCode === HttpCodes.NotFound) {
+                    resolve(response);
+                }
+                // get the result from the body
+                function dateTimeDeserializer(key, value) {
+                    if (typeof value === 'string') {
+                        const a = new Date(value);
+                        if (!isNaN(a.valueOf())) {
+                            return a;
+                        }
+                    }
+                    return value;
+                }
+                let obj;
+                let contents;
+                try {
+                    contents = yield res.readBody();
+                    if (contents && contents.length > 0) {
+                        if (options && options.deserializeDates) {
+                            obj = JSON.parse(contents, dateTimeDeserializer);
+                        }
+                        else {
+                            obj = JSON.parse(contents);
+                        }
+                        response.result = obj;
+                    }
+                    response.headers = res.message.headers;
+                }
+                catch (err) {
+                    // Invalid resource (contents not json);  leaving result obj null
+                }
+                // note that 3xx redirects are handled by the http layer.
+                if (statusCode > 299) {
+                    let msg;
+                    // if exception/error in body, attempt to get better error
+                    if (obj && obj.message) {
+                        msg = obj.message;
+                    }
+                    else if (contents && contents.length > 0) {
+                        // it may be the case that the exception is in the body message as string
+                        msg = contents;
+                    }
+                    else {
+                        msg = `Failed request: (${statusCode})`;
+                    }
+                    const err = new HttpClientError(msg, statusCode);
+                    err.result = response.result;
+                    reject(err);
+                }
+                else {
+                    resolve(response);
+                }
+            }));
+        });
+    }
+};
+const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$2 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28643,8 +29351,30 @@ var MediaTypes;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+class BearerCredentialHandler {
+    constructor(token) {
+        this.token = token;
+    }
+    // currently implements pre-authorization
+    // TODO: support preAuth = false where it hooks on 401
+    prepareRequest(options) {
+        if (!options.headers) {
+            throw Error('The request has no headers');
+        }
+        options.headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    // This handler cannot handle 401
+    canHandleAuthentication() {
+        return false;
+    }
+    handleAuthentication() {
+        return __awaiter$2(this, void 0, void 0, function* () {
+            throw new Error('not implemented');
+        });
+    }
+}
 
-(undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+var __awaiter$1 = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
         function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -28653,6 +29383,66 @@ var MediaTypes;
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+class OidcClient {
+    static createHttpClient(allowRetry = true, maxRetry = 10) {
+        const requestOptions = {
+            allowRetries: allowRetry,
+            maxRetries: maxRetry
+        };
+        return new HttpClient$1('actions/oidc-client', [new BearerCredentialHandler(OidcClient.getRequestToken())], requestOptions);
+    }
+    static getRequestToken() {
+        const token = process.env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
+        if (!token) {
+            throw new Error('Unable to get ACTIONS_ID_TOKEN_REQUEST_TOKEN env variable');
+        }
+        return token;
+    }
+    static getIDTokenUrl() {
+        const runtimeUrl = process.env['ACTIONS_ID_TOKEN_REQUEST_URL'];
+        if (!runtimeUrl) {
+            throw new Error('Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable');
+        }
+        return runtimeUrl;
+    }
+    static getCall(id_token_url) {
+        return __awaiter$1(this, void 0, void 0, function* () {
+            var _a;
+            const httpclient = OidcClient.createHttpClient();
+            const res = yield httpclient
+                .getJson(id_token_url)
+                .catch(error => {
+                throw new Error(`Failed to get ID Token. \n 
+        Error Code : ${error.statusCode}\n 
+        Error Message: ${error.message}`);
+            });
+            const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
+            if (!id_token) {
+                throw new Error('Response json body do not have ID Token field');
+            }
+            return id_token;
+        });
+    }
+    static getIDToken(audience) {
+        return __awaiter$1(this, void 0, void 0, function* () {
+            try {
+                // New ID Token is requested from action service
+                let id_token_url = OidcClient.getIDTokenUrl();
+                if (audience) {
+                    const encodedAudience = encodeURIComponent(audience);
+                    id_token_url = `${id_token_url}&audience=${encodedAudience}`;
+                }
+                debug$3(`ID token url is ${id_token_url}`);
+                const id_token = yield OidcClient.getCall(id_token_url);
+                setSecret(id_token);
+                return id_token;
+            }
+            catch (error) {
+                throw new Error(`Error message: ${error.message}`);
+            }
+        });
+    }
+}
 
 (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -28746,6 +29536,38 @@ var ExitCode;
      */
     ExitCode[ExitCode["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
+/**
+ * Registers a secret which will get masked from logs
+ *
+ * @param secret - Value of the secret to be masked
+ * @remarks
+ * This function instructs the Actions runner to mask the specified value in any
+ * logs produced during the workflow run. Once registered, the secret value will
+ * be replaced with asterisks (***) whenever it appears in console output, logs,
+ * or error messages.
+ *
+ * This is useful for protecting sensitive information such as:
+ * - API keys
+ * - Access tokens
+ * - Authentication credentials
+ * - URL parameters containing signatures (SAS tokens)
+ *
+ * Note that masking only affects future logs; any previous appearances of the
+ * secret in logs before calling this function will remain unmasked.
+ *
+ * @example
+ * ```typescript
+ * // Register an API token as a secret
+ * const apiToken = "abc123xyz456";
+ * setSecret(apiToken);
+ *
+ * // Now any logs containing this value will show *** instead
+ * console.log(`Using token: ${apiToken}`); // Outputs: "Using token: ***"
+ * ```
+ */
+function setSecret(secret) {
+    issueCommand('add-mask', {}, secret);
+}
 /**
  * Gets the value of an input.
  * Unless trimWhitespace is set to false in InputOptions, the value is also trimmed.
@@ -28864,6 +29686,11 @@ function group(name, fn) {
             endGroup();
         }
         return result;
+    });
+}
+function getIDToken(aud) {
+    return __awaiter(this, void 0, void 0, function* () {
+        return yield OidcClient.getIDToken(aud);
     });
 }
 
@@ -29437,7 +30264,7 @@ function createClientLogger$1(namespace) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$6 = createClientLogger$1("ts-http-runtime");
+const logger$7 = createClientLogger$1("ts-http-runtime");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -29450,7 +30277,7 @@ function setRequestCompletion(response, completion) {
     completion
         .then(() => requestCompletions.get(response) === completion && requestCompletions.delete(response))
         .catch((error) => {
-        logger$6.warning("Error tracking request completion", error);
+        logger$7.warning("Error tracking request completion", error);
     });
 }
 /**
@@ -29520,7 +30347,7 @@ function disposeNodeResponseBody(readableStream, disposed = new Set()) {
         if (readableStream.destroy) {
             if (isNodeEventEmitterBody(readableStream)) {
                 const onError = (error) => {
-                    logger$6.warning("Error disposing Node stream", error);
+                    logger$7.warning("Error disposing Node stream", error);
                 };
                 const onClose = () => {
                     readableStream.removeListener("error", onError);
@@ -29558,7 +30385,7 @@ function disposeNodeStream(stream) {
         disposeNodeResponseBody(stream);
     }
     catch (error) {
-        logger$6.warning("Error disposing Node stream", error);
+        logger$7.warning("Error disposing Node stream", error);
     }
 }
 /**
@@ -29588,7 +30415,7 @@ async function disposeResponseBody(response) {
         }
     }
     catch (error) {
-        logger$6.warning("Error disposing response body", error);
+        logger$7.warning("Error disposing response body", error);
     }
 }
 
@@ -30751,7 +31578,7 @@ function sendRequestBody(clientRequest, body, request, onError) {
             clientRequest.end(body);
         }
         else {
-            logger$6.error("Unrecognized body type", body);
+            logger$7.error("Unrecognized body type", body);
             throw new RestError$1("Unrecognized body type", { request });
         }
     }
@@ -30774,7 +31601,7 @@ function prepareRequestBody(request, useExpectContinue) {
     }
     const uploadReportStream = new ReportTransform(request.onUploadProgress);
     uploadReportStream.on("error", (e) => {
-        logger$6.error("Error in upload progress", e);
+        logger$7.error("Error in upload progress", e);
     });
     if (isReadableStream(body)) {
         pipeUploadStream(body, uploadReportStream, request);
@@ -30815,7 +31642,7 @@ class NodeHttpClient {
         if (request.timeout > 0) {
             timeoutId = setTimeout(() => {
                 const sanitizer = new Sanitizer();
-                logger$6.info(`request to '${sanitizer.sanitizeUrl(request.url)}' timed out. canceling...`);
+                logger$7.info(`request to '${sanitizer.sanitizeUrl(request.url)}' timed out. canceling...`);
                 abortController.abort();
             }, request.timeout);
         }
@@ -30857,7 +31684,7 @@ class NodeHttpClient {
                 setRequestCompletion(response, result.requestComplete);
                 const clearDisposer = setResponseBodyDisposer(response, result.disposeRequest);
                 result.requestComplete.then(clearDisposer).catch((error) => {
-                    logger$6.warning("Error disposing request", error);
+                    logger$7.warning("Error disposing request", error);
                 });
             }
             // Responses to HEAD must not have a body.
@@ -30878,7 +31705,7 @@ class NodeHttpClient {
             if (onDownloadProgress) {
                 const downloadReportStream = new ReportTransform(onDownloadProgress);
                 downloadReportStream.on("error", (e) => {
-                    logger$6.error("Error in download progress", e);
+                    logger$7.error("Error in download progress", e);
                 });
                 responseStream = pipeResponseStream(responseStream, downloadReportStream, abortController.signal);
             }
@@ -30928,7 +31755,7 @@ class NodeHttpClient {
                     }
                 })
                     .catch((e) => {
-                    logger$6.warning("Error when cleaning up abortListener on httpRequest", e);
+                    logger$7.warning("Error when cleaning up abortListener on httpRequest", e);
                 });
             }
         }
@@ -31011,7 +31838,7 @@ class NodeHttpClient {
             if (agent && agent.options.keepAlive === !disableKeepAlive) {
                 return agent;
             }
-            logger$6.info("No cached TLS Agent exist, creating a new Agent");
+            logger$7.info("No cached TLS Agent exist, creating a new Agent");
             agent = new https$1.Agent({
                 // keepAlive is true if disableKeepAlive is false.
                 keepAlive: !disableKeepAlive,
@@ -31168,7 +31995,7 @@ const logPolicyName = "logPolicy";
  * @param options - Options to configure logPolicy.
  */
 function logPolicy$1(options = {}) {
-    const logger = options.logger ?? logger$6.info;
+    const logger = options.logger ?? logger$7.info;
     const sanitizer = new Sanitizer({
         additionalAllowedHeaderNames: options.additionalAllowedHeaderNames,
         additionalAllowedQueryParameters: options.additionalAllowedQueryParameters,
@@ -33611,7 +34438,7 @@ function setProxyAgentOnRequest(request, cachedAgents, proxyUrl) {
     const url = new URL(request.url);
     const isInsecure = url.protocol !== "https:";
     if (request.tlsSettings) {
-        logger$6.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored.");
+        logger$7.warning("TLS settings are not supported in combination with custom Proxy, certificates provided to the client will be ignored.");
     }
     if (isInsecure) {
         if (!cachedAgents.httpProxyAgent) {
@@ -33721,7 +34548,7 @@ async function handleRedirect(next, response, maxRetries, allowCrossOriginRedire
         if (!allowCrossOriginRedirects) {
             const originalUrl = new URL(request.url);
             if (url.origin !== originalUrl.origin) {
-                logger$6.verbose(`Skipping cross-origin redirect from ${originalUrl.origin} to ${url.origin}.`);
+                logger$7.verbose(`Skipping cross-origin redirect from ${originalUrl.origin} to ${url.origin}.`);
                 return response;
             }
         }
@@ -33961,7 +34788,7 @@ function createClientLogger(namespace) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$5 = createClientLogger("core-rest-pipeline");
+const logger$6 = createClientLogger("core-rest-pipeline");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -33971,7 +34798,7 @@ const logger$5 = createClientLogger("core-rest-pipeline");
  */
 function logPolicy(options = {}) {
     return logPolicy$1({
-        logger: logger$5.info,
+        logger: logger$6.info,
         ...options,
     });
 }
@@ -34507,7 +35334,7 @@ function tryCreateTracingClient() {
         });
     }
     catch (e) {
-        logger$5.warning(`Error when creating the TracingClient: ${getErrorMessage(e)}`);
+        logger$6.warning(`Error when creating the TracingClient: ${getErrorMessage(e)}`);
         return undefined;
     }
 }
@@ -34531,7 +35358,7 @@ function tryCreateSpan(tracingClient, request, spanAttributes) {
         return { span, tracingContext: updatedOptions.tracingOptions.tracingContext };
     }
     catch (e) {
-        logger$5.warning(`Skipping creating a tracing span due to an error: ${getErrorMessage(e)}`);
+        logger$6.warning(`Skipping creating a tracing span due to an error: ${getErrorMessage(e)}`);
         return undefined;
     }
 }
@@ -34547,7 +35374,7 @@ function tryProcessError(span, error) {
         span.end();
     }
     catch (e) {
-        logger$5.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
+        logger$6.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
     }
 }
 function tryProcessResponse(span, response) {
@@ -34568,7 +35395,7 @@ function tryProcessResponse(span, response) {
         span.end();
     }
     catch (e) {
-        logger$5.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
+        logger$6.warning(`Skipping tracing span processing due to an error: ${getErrorMessage(e)}`);
     }
 }
 
@@ -34634,7 +35461,7 @@ function cleanupOnRequestResponseCompletion(response, cleanup) {
             cleanupIfComplete();
         }
         catch (error) {
-            logger$5.warning("Error cleaning up after response stream completion", error);
+            logger$6.warning("Error cleaning up after response stream completion", error);
         }
     };
     if (!nodeResponseDone && stream) {
@@ -34649,7 +35476,7 @@ function cleanupOnRequestResponseCompletion(response, cleanup) {
             return cleanupIfComplete();
         })
             .catch((error) => {
-            logger$5.warning("Error cleaning up after request completion", error);
+            logger$6.warning("Error cleaning up after request completion", error);
         });
     }
     if (browserResponseCompletion) {
@@ -34659,7 +35486,7 @@ function cleanupOnRequestResponseCompletion(response, cleanup) {
             return cleanupIfComplete();
         })
             .catch((error) => {
-            logger$5.warning("Error cleaning up after response body completion", error);
+            logger$6.warning("Error cleaning up after response body completion", error);
         });
     }
     cleanupIfComplete();
@@ -35032,7 +35859,7 @@ async function authorizeRequestOnCaeChallenge(onChallengeOptions, caeClaims) {
  */
 function bearerTokenAuthenticationPolicy(options) {
     const { credential, scopes, challengeCallbacks } = options;
-    const logger = options.logger || logger$5;
+    const logger = options.logger || logger$6;
     const callbacks = {
         authorizeRequest: challengeCallbacks?.authorizeRequest?.bind(challengeCallbacks) ?? defaultAuthorizeRequest,
         authorizeRequestOnChallenge: challengeCallbacks?.authorizeRequestOnChallenge?.bind(challengeCallbacks),
@@ -35193,7 +36020,7 @@ function getCaeChallengeClaims(challenges) {
     return parsedChallenges.find((x) => x.scheme === "Bearer" && x.params.claims && x.params.error === "insufficient_claims")?.params.claims;
 }
 
-const logger$4 = createClientLogger("container-registry");
+const logger$5 = createClientLogger("container-registry");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -37113,7 +37940,7 @@ function appendQueryParams(url, queryParams, sequenceParams, noOverwrite = false
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$3 = createClientLogger("core-client");
+const logger$4 = createClientLogger("core-client");
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -37151,7 +37978,7 @@ class ServiceClient {
         this._requestContentType = options.requestContentType;
         this._endpoint = options.endpoint ?? options.baseUri;
         if (options.baseUri) {
-            logger$3.warning("The baseUri option for SDK Clients has been deprecated, please use endpoint instead.");
+            logger$4.warning("The baseUri option for SDK Clients has been deprecated, please use endpoint instead.");
         }
         this._allowInsecureConnection = options.allowInsecureConnection;
         this._httpClient = options.httpClient || getCachedDefaultHttpClient();
@@ -41440,7 +42267,7 @@ class ContainerRegistryClient {
         ...options?.redirectOptions
       },
       loggingOptions: {
-        logger: logger$4.info,
+        logger: logger$5.info,
         // This array contains header names we want to log that are not already
         // included as safe. Unknown/unsafe headers are logged as "<REDACTED>".
         additionalAllowedQueryParameters: ["last", "n", "orderby", "digest"]
@@ -41864,7 +42691,7 @@ class AuthenticationRequiredError extends Error {
 /**
  * The AzureLogger used for all clients within the identity package
  */
-const logger$2 = createClientLogger("identity");
+const logger$3 = createClientLogger("identity");
 /**
  * Formatting the success event on the credentials
  */
@@ -41889,7 +42716,7 @@ function formatError(scope, error) {
  *   `[title] => [message]`
  *
  */
-function credentialLoggerInstance(title, parent, log = logger$2) {
+function credentialLoggerInstance(title, parent, log = logger$3) {
     const fullTitle = parent ? `${parent.fullTitle} ${title}` : title;
     function info(message) {
         log.info(`${fullTitle} =>`, message);
@@ -41922,7 +42749,7 @@ function credentialLoggerInstance(title, parent, log = logger$2) {
  *   `[title] => getToken() => [message]`
  *
  */
-function credentialLogger(title, log = logger$2) {
+function credentialLogger(title, log = logger$3) {
     const credLogger = credentialLoggerInstance(title, undefined, log);
     return {
         ...credLogger,
@@ -60898,7 +61725,7 @@ class ConfidentialClientApplication extends ClientApplication {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger$1 = credentialLogger("IdentityUtils");
+const logger$2 = credentialLogger("IdentityUtils");
 /**
  * Latest AuthenticationRecord version
  */
@@ -60909,7 +61736,7 @@ const LatestAuthenticationRecordVersion = "1.0";
  */
 function ensureValidMsalToken(scopes, msalToken, getTokenOptions) {
     const error = (message) => {
-        logger$1.getToken.info(message);
+        logger$2.getToken.info(message);
         return new AuthenticationRequiredError({
             scopes: Array.isArray(scopes) ? scopes : [scopes],
             getTokenOptions,
@@ -61009,17 +61836,17 @@ function handleMsalError(scopes, error, getTokenOptions) {
         const msalError = error;
         switch (msalError.errorCode) {
             case "endpoints_resolution_error":
-                logger$1.info(formatError(scopes, error.message));
+                logger$2.info(formatError(scopes, error.message));
                 return new CredentialUnavailableError(error.message);
             case "device_code_polling_cancelled":
                 return new AbortError$1("The authentication has been aborted by the caller.");
             case "consent_required":
             case "interaction_required":
             case "login_required":
-                logger$1.info(formatError(scopes, `Authentication returned errorCode ${msalError.errorCode}`));
+                logger$2.info(formatError(scopes, `Authentication returned errorCode ${msalError.errorCode}`));
                 break;
             default:
-                logger$1.info(formatError(scopes, `Failed to acquire token: ${error.message}`));
+                logger$2.info(formatError(scopes, `Failed to acquire token: ${error.message}`));
                 break;
         }
     }
@@ -61030,7 +61857,7 @@ function handleMsalError(scopes, error, getTokenOptions) {
         return error;
     }
     if (error.name === "NativeAuthError") {
-        logger$1.info(formatError(scopes, `Error from the native broker: ${error.message} with status code: ${error.statusCode}`));
+        logger$2.info(formatError(scopes, `Error from the native broker: ${error.message} with status code: ${error.statusCode}`));
         return error;
     }
     return new AuthenticationRequiredError({
@@ -61194,7 +62021,7 @@ class IdentityClient extends ServiceClient {
         }
     }
     async sendTokenRequest(request) {
-        logger$2.info(`IdentityClient: sending token request to [${request.url}]`);
+        logger$3.info(`IdentityClient: sending token request to [${request.url}]`);
         const response = await this.sendRequest(request);
         if (response.bodyAsText && (response.status === 200 || response.status === 201)) {
             const parsedBody = JSON.parse(response.bodyAsText);
@@ -61211,12 +62038,12 @@ class IdentityClient extends ServiceClient {
                 },
                 refreshToken: parsedBody.refresh_token,
             };
-            logger$2.info(`IdentityClient: [${request.url}] token acquired, expires on ${token.accessToken.expiresOnTimestamp}`);
+            logger$3.info(`IdentityClient: [${request.url}] token acquired, expires on ${token.accessToken.expiresOnTimestamp}`);
             return token;
         }
         else {
             const error = new AuthenticationError(response.status, response.bodyAsText);
-            logger$2.warning(`IdentityClient: authentication error. HTTP status: ${response.status}, ${error.errorResponse.errorDescription}`);
+            logger$3.warning(`IdentityClient: authentication error. HTTP status: ${response.status}, ${error.errorResponse.errorDescription}`);
             throw error;
         }
     }
@@ -61224,7 +62051,7 @@ class IdentityClient extends ServiceClient {
         if (refreshToken === undefined) {
             return null;
         }
-        logger$2.info(`IdentityClient: refreshing access token with client ID: ${clientId}, scopes: ${scopes} started`);
+        logger$3.info(`IdentityClient: refreshing access token with client ID: ${clientId}, scopes: ${scopes} started`);
         const refreshParams = {
             grant_type: "refresh_token",
             client_id: clientId,
@@ -61250,7 +62077,7 @@ class IdentityClient extends ServiceClient {
                     tracingOptions: updatedOptions.tracingOptions,
                 });
                 const response = await this.sendTokenRequest(request);
-                logger$2.info(`IdentityClient: refreshed token for client ID: ${clientId}`);
+                logger$3.info(`IdentityClient: refreshed token for client ID: ${clientId}`);
                 return response;
             }
             catch (err) {
@@ -61259,11 +62086,11 @@ class IdentityClient extends ServiceClient {
                     // It's likely that the refresh token has expired, so
                     // return null so that the credential implementation will
                     // initiate the authentication flow again.
-                    logger$2.info(`IdentityClient: interaction required for client ID: ${clientId}`);
+                    logger$3.info(`IdentityClient: interaction required for client ID: ${clientId}`);
                     return null;
                 }
                 else {
-                    logger$2.warning(`IdentityClient: failed refreshing token for client ID: ${clientId}: ${err}`);
+                    logger$3.warning(`IdentityClient: failed refreshing token for client ID: ${clientId}: ${err}`);
                     throw err;
                 }
             }
@@ -61376,10 +62203,10 @@ class IdentityClient extends ServiceClient {
             }
             const base64Metadata = accessToken.split(".")[1];
             const { appid, upn, tid, oid } = JSON.parse(uint8ArrayToString(stringToUint8Array(base64Metadata, "base64url"), "utf-8"));
-            logger$2.info(`[Authenticated account] Client ID: ${appid}. Tenant ID: ${tid}. User Principal Name: ${upn || unavailableUpn}. Object ID (user): ${oid}`);
+            logger$3.info(`[Authenticated account] Client ID: ${appid}. Tenant ID: ${tid}. User Principal Name: ${upn || unavailableUpn}. Object ID (user): ${oid}`);
         }
         catch (e) {
-            logger$2.warning("allowLoggingAccountIdentifiers was set, but we couldn't log the account information. Error:", e.message);
+            logger$3.warning("allowLoggingAccountIdentifiers was set, but we couldn't log the account information. Error:", e.message);
         }
     }
     /**
@@ -61392,7 +62219,7 @@ class IdentityClient extends ServiceClient {
             parsedBody = JSON.parse(response.bodyAsText || "");
         }
         catch (error) {
-            logger$2.info(`IdentityClient: Could not parse response body: ${error}`);
+            logger$3.info(`IdentityClient: Could not parse response body: ${error}`);
             let errorType;
             let errorDescriptionHelper;
             /**
@@ -62143,7 +62970,7 @@ function ensureScopes(scopes) {
 
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-const logger = credentialLogger("ClientSecretCredential");
+const logger$1 = credentialLogger("ClientSecretCredential");
 /**
  * Enables authentication to Microsoft Entra ID using a client secret
  * that was generated for an App Registration. More information on how
@@ -62182,6 +63009,64 @@ class ClientSecretCredential {
         this.additionallyAllowedTenantIds = resolveAdditionallyAllowedTenantIds(options?.additionallyAllowedTenants);
         this.msalClient = createMsalClient(clientId, tenantId, {
             ...options,
+            logger: logger$1,
+        });
+    }
+    /**
+     * Authenticates with Microsoft Entra ID and returns an access token if successful.
+     * If authentication fails, a {@link CredentialUnavailableError} will be thrown with the details of the failure.
+     *
+     * @param scopes - The list of scopes for which the token will have access.
+     * @param options - The options used to configure any requests this
+     *                TokenCredential implementation might make.
+     */
+    async getToken(scopes, options = {}) {
+        return tracingClient.withSpan(`${this.constructor.name}.getToken`, options, async (newOptions) => {
+            newOptions.tenantId = processMultiTenantRequest(this.tenantId, newOptions, this.additionallyAllowedTenantIds, logger$1);
+            const arrayScopes = ensureScopes(scopes);
+            return this.msalClient.getTokenByClientSecret(arrayScopes, this.clientSecret, newOptions);
+        });
+    }
+}
+
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+const logger = credentialLogger("ClientAssertionCredential");
+/**
+ * Authenticates a service principal with a JWT assertion.
+ */
+class ClientAssertionCredential {
+    msalClient;
+    tenantId;
+    additionallyAllowedTenantIds;
+    getAssertion;
+    options;
+    /**
+     * Creates an instance of the ClientAssertionCredential with the details
+     * needed to authenticate against Microsoft Entra ID with a client
+     * assertion provided by the developer through the `getAssertion` function parameter.
+     *
+     * @param tenantId - The Microsoft Entra tenant (directory) ID.
+     * @param clientId - The client (application) ID of an App Registration in the tenant.
+     * @param getAssertion - A function that retrieves the assertion for the credential to use.
+     * @param options - Options for configuring the client which makes the authentication request.
+     */
+    constructor(tenantId, clientId, getAssertion, options = {}) {
+        if (!tenantId) {
+            throw new CredentialUnavailableError("ClientAssertionCredential: tenantId is a required parameter.");
+        }
+        if (!clientId) {
+            throw new CredentialUnavailableError("ClientAssertionCredential: clientId is a required parameter.");
+        }
+        if (!getAssertion) {
+            throw new CredentialUnavailableError("ClientAssertionCredential: clientAssertion is a required parameter.");
+        }
+        this.tenantId = tenantId;
+        this.additionallyAllowedTenantIds = resolveAdditionallyAllowedTenantIds(options?.additionallyAllowedTenants);
+        this.options = options;
+        this.getAssertion = getAssertion;
+        this.msalClient = createMsalClient(clientId, tenantId, {
+            ...this.options,
             logger,
         });
     }
@@ -62196,8 +63081,8 @@ class ClientSecretCredential {
     async getToken(scopes, options = {}) {
         return tracingClient.withSpan(`${this.constructor.name}.getToken`, options, async (newOptions) => {
             newOptions.tenantId = processMultiTenantRequest(this.tenantId, newOptions, this.additionallyAllowedTenantIds, logger);
-            const arrayScopes = ensureScopes(scopes);
-            return this.msalClient.getTokenByClientSecret(arrayScopes, this.clientSecret, newOptions);
+            const arrayScopes = Array.isArray(scopes) ? scopes : [scopes];
+            return this.msalClient.getTokenByClientAssertion(arrayScopes, this.getAssertion, newOptions);
         });
     }
 }
@@ -62267,6 +63152,7 @@ async function run() {
         const secret = getInput('secret');
         const clientId = getInput('clientId');
         const audienceString = getInput('audience');
+        const oidcAudience = getInput('oidcAudience') || 'api://AzureADTokenExchange';
         let audience;
         switch (audienceString.toLowerCase()) {
             case 'china':
@@ -62290,7 +63176,22 @@ async function run() {
         debug$3(`has tenantId: ${tenantId && tenantId !== ''}`);
         debug$3(`has secret: ${secret && secret !== ''}`);
         debug$3(`has clientId: ${clientId && clientId !== ''}`);
-        const client = new ContainerRegistryClient(endpoint, new ClientSecretCredential(tenantId, clientId, secret), {
+        let credential;
+        if (secret) {
+            info('Authenticating with client secret');
+            credential = new ClientSecretCredential(tenantId, clientId, secret);
+        }
+        else {
+            // No secret given: use the GitHub OIDC token as a federated credential.
+            // Requires `permissions: id-token: write` and a federated credential on the Azure app registration.
+            info('No secret provided, authenticating with GitHub OIDC');
+            credential = new ClientAssertionCredential(tenantId, clientId, async () => {
+                const token = await getIDToken(oidcAudience);
+                setSecret(token);
+                return token;
+            });
+        }
+        const client = new ContainerRegistryClient(endpoint, credential, {
             audience,
         });
         for (const repoName of repos) {

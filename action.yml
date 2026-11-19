@@ -1,4 +1,4 @@
-name: '@i40mc/azure-container-registry-cleanup-action'
+name: '@onward-partners/azure-container-registry-cleanup-action'
 description: 'This action cleans up old image tags in an Azure Container Registry'
 author: 'scomans'
 inputs:
@@ -18,8 +18,8 @@ inputs:
     required: true
     description: 'Azure Tenant ID'
   secret:
-    required: true
-    description: 'Azure Secret'
+    required: false
+    description: 'Azure client secret. If omitted, the action authenticates via GitHub OIDC (federated credentials). This requires "permissions: id-token: write" in the workflow'
   clientId:
     required: true
     description: 'Azure Client ID'
@@ -29,6 +29,10 @@ inputs:
   endpoint:
     required: true
     description: 'Azure Container Registry endpoint'
+  oidcAudience:
+    required: false
+    default: 'api://AzureADTokenExchange'
+    description: 'Audience of the GitHub OIDC token used when no secret is provided'
   audience:
     required: false
     default: PublicCloud

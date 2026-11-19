@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   setOutput: vi.fn(),
   clientArgs: [] as unknown[][],
   credentialArgs: [] as unknown[][],
+  assertionArgs: [] as unknown[][],
+  idTokenAudiences: [] as string[],
+  setSecret: vi.fn(),
   listCalls: [] as { repo: string; options: unknown }[],
   deleted: [] as { repo: string; digest: string }[],
   repos: {} as Record<string, FakeManifest[]>,
@@ -33,9 +36,19 @@ vi.mock('@actions/core', () => ({
   debug: mocks.debug,
   setFailed: mocks.setFailed,
   setOutput: mocks.setOutput,
+  setSecret: mocks.setSecret,
+  getIDToken: async (audience: string) => {
+    mocks.idTokenAudiences.push(audience);
+    return 'github-oidc-token';
+  },
 }));
 
 vi.mock('@azure/identity', () => ({
+  ClientAssertionCredential: class {
+    constructor(...args: unknown[]) {
+      mocks.assertionArgs.push(args);
+    }
+  },
   ClientSecretCredential: class {
     constructor(...args: unknown[]) {
       mocks.credentialArgs.push(args);
@@ -117,6 +130,8 @@ beforeEach(() => {
   for (const key of Object.keys(mocks.repos)) delete mocks.repos[key];
   mocks.clientArgs.length = 0;
   mocks.credentialArgs.length = 0;
+  mocks.assertionArgs.length = 0;
+  mocks.idTokenAudiences.length = 0;
   mocks.listCalls.length = 0;
   mocks.deleted.length = 0;
   mocks.failDeleteOf = undefined;
@@ -311,6 +326,38 @@ describe('client setup', () => {
     await runAction({ audience });
 
     expect(mocks.clientArgs[0][2]).toEqual({ audience: expected });
+  });
+
+  it('uses the client secret when one is given', async () => {
+    await runAction({ secret: 's' });
+
+    expect(mocks.credentialArgs).toHaveLength(1);
+    expect(mocks.assertionArgs).toEqual([]);
+  });
+
+  it('authenticates with GitHub OIDC when no secret is given', async () => {
+    await runAction({ secret: '', tenantId: 't', clientId: 'c' });
+
+    expect(mocks.credentialArgs).toEqual([]);
+    expect(mocks.assertionArgs).toHaveLength(1);
+    const [tenant, client, getAssertion] = mocks.assertionArgs[0] as [
+      string,
+      string,
+      () => Promise<string>,
+    ];
+    expect([tenant, client]).toEqual(['t', 'c']);
+
+    expect(await getAssertion()).toBe('github-oidc-token');
+    expect(mocks.idTokenAudiences).toEqual(['api://AzureADTokenExchange']);
+    expect(mocks.setSecret).toHaveBeenCalledWith('github-oidc-token');
+  });
+
+  it('uses a custom OIDC audience', async () => {
+    await runAction({ secret: '', oidcAudience: 'api://custom' });
+
+    const getAssertion = mocks.assertionArgs[0][2] as () => Promise<string>;
+    await getAssertion();
+    expect(mocks.idTokenAudiences).toEqual(['api://custom']);
   });
 
   it('does not log the secret', async () => {

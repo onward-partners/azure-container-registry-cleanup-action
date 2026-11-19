@@ -1,5 +1,5 @@
 {
-  "name": "@i40mc/azure-container-registry-cleanup-action",
+  "name": "@onward-partners/azure-container-registry-cleanup-action",
   "private": true,
   "version": "2.3.0",
   "description": "This action cleans up old image tags in an Azure Container Registry",
@@ -15,7 +15,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/i40mc/azure-container-registry-cleanup-action.git"
+    "url": "git+https://github.com/onward-partners/azure-container-registry-cleanup-action.git"
   },
   "keywords": [
     "actions",
